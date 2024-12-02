@@ -56,7 +56,6 @@ extern int_handler
 
 isr_common:
     pushaq
-
     mov rdi, rsp
     call int_handler
     popaq

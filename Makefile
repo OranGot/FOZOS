@@ -48,4 +48,4 @@ hdd:
 	mcopy -i FOZOS.img@@1M limine/BOOTX64.EFI ::/EFI/BOOT
 	mcopy -i FOZOS.img@@1M limine/BOOTIA32.EFI ::/EFI/BOOT
 	qemu-system-x86_64   -drive id=disk,file=FOZOS.img,if=none,format=raw\
- -debugcon stdio -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G
+ -debugcon stdio -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -no-reboot

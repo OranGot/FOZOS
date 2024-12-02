@@ -38,7 +38,6 @@ export fn _start() callconv(.C) noreturn {
     }
 
     idt.initidt();
-
     pic.PIC_remap(0x20, 0x20 + 8);
     pic.clear_mask();
     asm volatile ("sti");
@@ -55,8 +54,5 @@ export fn _start() callconv(.C) noreturn {
     tty.printf("|/       (_______)(_______/(_______)\\_______)\n", .{});
     tty.printf("Hello from FOZOS!!!\n", .{});
     dbg.printf("FOZOS init done\n", .{});
-    //done();
-    while (true) {
-        done();
-    }
+    done();
 }

@@ -1,4 +1,4 @@
-# FOZOS(Free Open source Zig Operating System)
+# FOZOS
 ## A tiny bit of history
   This is my third operating system. It is a rewrite of my previous one(OranGOS) to zig and x64
   with limine bootloader
