@@ -4,3 +4,4 @@ FOZOS.img
 codedump
 .zig-cache
 obj/*
+qemu.log

@@ -74,14 +74,14 @@ pub fn IRQ_set_mask(IRQline: u8) void {
 pub fn IRQ_clear_mask(IRQline: u8) void {
     var port: u16 = undefined;
     var value: u8 = undefined;
-
-    if (IRQline < 8) {
+    var line = IRQline;
+    if (line < 8) {
         port = PIC1_DATA;
     } else {
         port = PIC2_DATA;
-        IRQline -= 8;
+        line -= 8;
     }
-    value = pio.inb(port) & ~(1 << IRQline);
+    value = pio.inb(port) & ~(@as(u8, 1) << @truncate(line));
     pio.outb(port, value);
 }
 const PIC_READ_IRR = 0x0a; // OCW3 irq ready next CMD read

@@ -27,6 +27,11 @@ pub fn build(b: *std.Build) void {
         .code_model = code_model,
     });
     kernel.addObjectFile(b.path("obj/idt.o"));
+    kernel.addCSourceFile(.{
+        .file = b.path("kernel/arch/x64/interrupts/idt.c"),
+        .flags = &[_][]const u8{"-std=c99"},
+    });
+    // kernel.addCSourceFile(b.path("kernel/arch/x64/interrupts/idt.h"));
     kernel.want_lto = false;
     //const root_source = b.path("kernel/main.zig");
     // Add Limine as a dependency.

@@ -3,7 +3,7 @@ const limine = @import("limine");
 const std = @import("std");
 const tty = @import("drivers/tty/tty.zig");
 const dbg = @import("drivers/dbg/dbg.zig");
-const idt = @import("arch/x64/interrupts/idt.zig");
+const idt = @import("arch/x64/interrupts/handle.zig");
 const pic = @import("drivers/pic/pic.zig");
 // The Limine requests can be placed anywhere, but it is important that
 // the compiler does not optimise them away, so, usually, they should
@@ -37,9 +37,10 @@ export fn _start() callconv(.C) noreturn {
         dbg.printf("FRAMEBUFFER FAIL\n", .{});
     }
 
-    idt.initidt();
+    idt.init();
     pic.PIC_remap(0x20, 0x20 + 8);
-    pic.clear_mask();
+    pic.IRQ_clear_mask(1);
+    //pic.clear_mask();
     asm volatile ("sti");
     if (address_request.response) |response| {
         tty.printf("kernel loaded at 0x{x}(physical base) and 0x{x}(virtual base)\n", .{ response.physical_base, response.virtual_base });
