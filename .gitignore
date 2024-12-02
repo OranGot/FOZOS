@@ -1,0 +1,6 @@
+limine
+zig-out/bin
+FOZOS.img
+codedump
+.zig-cache
+obj/*
