@@ -11,12 +11,6 @@ pub inline fn inb(port: u16) u8 {
         : [port] "N{dx}" (port),
     );
 }
-pub inline fn lidt(idtr: usize) void {
-    asm volatile ("lidt (%[idtr])"
-        :
-        : [idtr] "r" (idtr),
-    );
-}
 pub inline fn invlpg(v_addr: usize) void {
     asm volatile ("invlpg (%[v_addr])"
         :
@@ -24,6 +18,6 @@ pub inline fn invlpg(v_addr: usize) void {
         : "memory"
     );
 }
-pub fn io_wait()void{
+pub fn io_wait() void {
     outb(0x80, 0);
 }

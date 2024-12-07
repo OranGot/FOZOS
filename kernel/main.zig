@@ -5,6 +5,8 @@ const tty = @import("drivers/tty/tty.zig");
 const dbg = @import("drivers/dbg/dbg.zig");
 const idt = @import("arch/x64/interrupts/handle.zig");
 const pic = @import("drivers/pic/pic.zig");
+const pageframe = @import("arch/x64/paging/pageframe_allocator.zig");
+
 // The Limine requests can be placed anywhere, but it is important that
 // the compiler does not optimise them away, so, usually, they should
 // be made volatile or equivalent. In Zig, `export var` is what we use.
@@ -20,10 +22,7 @@ inline fn done() noreturn {
         asm volatile ("hlt");
     }
 }
-
-// The following will be our kernel's entry point.
 export fn _start() callconv(.C) noreturn {
-    // Ensure the bootloader actually understands our base revision (see spec).
     if (!base_revision.is_supported()) {
         done();
     }
@@ -45,6 +44,7 @@ export fn _start() callconv(.C) noreturn {
     if (address_request.response) |response| {
         tty.printf("kernel loaded at 0x{x}(physical base) and 0x{x}(virtual base)\n", .{ response.physical_base, response.virtual_base });
     }
+    pageframe.setup();
     tty.printf(" _______  _______  _______  _______  _______ \n", .{});
     tty.printf("(  ____ \\(  ___  )/ ___   )(  ___  )(  ____ \\\n", .{});
     tty.printf("| (    \\/| (   ) |\\/   )  || (   ) || (    \\/\n", .{});
