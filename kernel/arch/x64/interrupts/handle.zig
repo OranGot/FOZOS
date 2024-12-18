@@ -91,7 +91,34 @@ fn exep_handle(int: *int_regs) void {
         int.rsp,                       int.rflags,
         int.ss,                        int.cs,
     });
+    dbg.printf("FOZOS CRASHED!!!\nCAUSE: {s}: 0x{x}, ERROR CODE: 0b{b}\n" ++
+        "REGISTERS\nR15: 0x{x}, R14: 0x{x}, R13: 0x{x}, R12: 0x{x}, R11: 0x{x}, R10: 0x{x} R9: 0x{x} " ++
+        "R8: 0x{x}\nRAX: 0x{x}, RBX: 0x{x}, RCX: 0x{x}, RDX: 0x{x}, RBP: 0x{x}, RIP: 0x{x}, RSI: 0x{x}, RSP: 0x{x}\n" ++
+        "RFLAGS: 0x{x}, SS: 0x{x}, CS: 0x{x}\n", .{
+        exep_lookup_table[int.int_no], int.int_no,
+        int.error_code,                int.r15,
+        int.r14,                       int.r13,
+        int.r12,                       int.r11,
+        int.r10,                       int.r9,
+        int.r8,                        int.rax,
+        int.rbx,                       int.rcx,
+        int.rdx,                       int.rbp,
+        int.rip,                       int.rsi,
+        int.rsp,                       int.rflags,
+        int.ss,                        int.cs,
+    });
+
+    if (int.int_no == 0xe) {
+        const cr2 = dump_cr2();
+        tty.printf("address of page fault: 0x{x}", .{cr2});
+        dbg.printf("address of page fault: 0x{x}", .{cr2});
+    }
     asm volatile ("cli; hlt");
+}
+fn dump_cr2() usize {
+    return asm ("mov %[result], %cr2"
+        : [result] "={rax}" (-> usize),
+    );
 }
 pub export fn handle_int(int: *int_regs) callconv(.C) void {
     if (int.int_no < 32) {

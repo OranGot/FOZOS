@@ -11,6 +11,20 @@ pub inline fn inb(port: u16) u8 {
         : [port] "N{dx}" (port),
     );
 }
+pub inline fn outl(port: u16, val: u32) void {
+    asm volatile ("outl %[val], %[port]"
+        :
+        : [val] "{eax}" (val),
+          [port] "N{dx}" (port),
+    );
+}
+
+pub inline fn inl(port: u16) u32 {
+    return asm ("inl %[port], %[result]"
+        : [result] "={eax}" (-> u32),
+        : [port] "{dx}" (port),
+    );
+}
 pub inline fn invlpg(v_addr: usize) void {
     asm volatile ("invlpg (%[v_addr])"
         :

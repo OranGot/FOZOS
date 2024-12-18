@@ -11,10 +11,6 @@ const pageframe = @import("arch/x64/paging/pageframe_allocator.zig");
 // the compiler does not optimise them away, so, usually, they should
 // be made volatile or equivalent. In Zig, `export var` is what we use.
 pub export var framebuffer_request: limine.FramebufferRequest = .{};
-
-// Set the base revision to 2, this is recommended as this is the latest
-// base revision described by the Limine boot protocol specification.
-// See specification for further info.
 pub export var base_revision: limine.BaseRevision = .{ .revision = 2 };
 pub export var address_request: limine.KernelAddressRequest = .{};
 inline fn done() noreturn {
@@ -22,6 +18,8 @@ inline fn done() noreturn {
         asm volatile ("hlt");
     }
 }
+const pci = @import("drivers/pci.zig");
+const alloc = @import("arch/x64/paging/gp_allocator.zig");
 export fn _start() callconv(.C) noreturn {
     if (!base_revision.is_supported()) {
         done();
@@ -44,7 +42,17 @@ export fn _start() callconv(.C) noreturn {
     if (address_request.response) |response| {
         tty.printf("kernel loaded at 0x{x}(physical base) and 0x{x}(virtual base)\n", .{ response.physical_base, response.virtual_base });
     }
+    tty.printf("Interrupts setup\n", .{});
     pageframe.setup();
+    pageframe.print_mem();
+    pci.init_devices();
+    const allocator = alloc.init();
+    dbg.printf("allocator initialised\n", .{});
+    const a: []u8 = allocator.alloc(u8, 10) catch {
+        @panic("allocator tests failed");
+    };
+    dbg.printf("alloc test: {}\n", .{@intFromPtr(a.ptr)});
+    tty.printf("paging setup\n", .{});
     tty.printf(" _______  _______  _______  _______  _______ \n", .{});
     tty.printf("(  ____ \\(  ___  )/ ___   )(  ___  )(  ____ \\\n", .{});
     tty.printf("| (    \\/| (   ) |\\/   )  || (   ) || (    \\/\n", .{});
@@ -55,5 +63,21 @@ export fn _start() callconv(.C) noreturn {
     tty.printf("|/       (_______)(_______/(_______)\\_______)\n", .{});
     tty.printf("Hello from FOZOS!!!\n", .{});
     dbg.printf("FOZOS init done\n", .{});
+    done();
+}
+pub fn panic(message: []const u8, trace: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
+    tty.printf("FOZOS PANIC: {s}\n", .{message});
+    if (addr) |a| {
+        tty.printf("at 0x{x}\n", .{a});
+    } else {
+        tty.printf("no address\n", .{});
+    }
+    if (trace) |tr| {
+        for (0..tr.index) |i| {
+            tty.printf("i: {}. Instruction at: {x}\n", .{ i, tr.instruction_addresses[i] });
+        }
+    } else {
+        tty.printf("no trace\n", .{});
+    }
     done();
 }
