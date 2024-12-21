@@ -18,6 +18,7 @@ inline fn done() noreturn {
         asm volatile ("hlt");
     }
 }
+const pf = @import("arch/x64/paging/pageframe.zig");
 const pci = @import("drivers/pci.zig");
 const alloc = @import("arch/x64/paging/gp_allocator.zig");
 export fn _start() callconv(.C) noreturn {
@@ -36,7 +37,7 @@ export fn _start() callconv(.C) noreturn {
 
     idt.init();
     pic.PIC_remap(0x20, 0x20 + 8);
-    pic.IRQ_clear_mask(1);
+    //pic.IRQ_clear_mask(1);
     //pic.clear_mask();
     asm volatile ("sti");
     if (address_request.response) |response| {
@@ -45,7 +46,9 @@ export fn _start() callconv(.C) noreturn {
     tty.printf("Interrupts setup\n", .{});
     pageframe.setup();
     pageframe.print_mem();
+    pf.remap_stack(8);
     pci.init_devices();
+    //pf.dump_stack_values();
     const allocator = alloc.init();
     dbg.printf("allocator initialised\n", .{});
     const a: []u8 = allocator.alloc(u8, 10) catch {

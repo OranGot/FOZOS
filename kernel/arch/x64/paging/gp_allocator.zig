@@ -55,7 +55,7 @@ pub const gp_allocator = struct {
                     dbg.printf("found a fitting descriptor\n", .{});
                     var i: usize = 0;
                     while (i < pageframe.PAGE_SIZE) : (i += 1) { // NOTE: this is probably very inefficent as I use first fit
-                        if (d.bitmap[pageframe.PAGE_SIZE % i] == 1) {
+                        if (get_bit_of_num(d.bitmap[pageframe.PAGE_SIZE / i], @truncate(pageframe.PAGE_SIZE % i * 8)) == true) {
                             if (curfit >= len and mem.isAligned(d.base + i, @as(u64, 1) << @truncate(ptr_align))) {
                                 return @ptrFromInt(d.base + i - curfit);
                             }
@@ -137,4 +137,10 @@ pub fn init() mem.Allocator {
         .ptr = &allocator,
         .vtable = vtable,
     };
+}
+inline fn get_bit_of_num(num: usize, bit: u8) bool {
+    if ((num >> @truncate(bit)) & 1 == 1) return true else return false;
+}
+inline fn set_bit_of_num(num: *usize, bit: u8, state: bool) void {
+    num & ~(@intFromBool(!state) << @truncate(bit));
 }

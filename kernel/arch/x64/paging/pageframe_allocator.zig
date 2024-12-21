@@ -44,7 +44,7 @@ pub fn setup() void {
                     limine.MemoryMapEntryType.bootloader_reclaimable => list_entry_type.FREE,
                     limine.MemoryMapEntryType.kernel_and_modules => d: {
                         dbg.printf("setting up paging kernel length: 0x{x}\n", .{i.length});
-                        pageframe.setup_paging(i.base, i.length, 0xffffffff80000000);
+                        pageframe.setup_paging(i.base, i.length);
                         dbg.printf("paging set up\n", .{});
                         break :d list_entry_type.NO_FREE_RESERVED;
                     },
@@ -120,9 +120,7 @@ fn allocate_pages_in_node(pageno: u64, node: *list_entry, pnode: ?*list_entry) P
         dbg.printf("else clause\n", .{});
         var current_page: *header_page = &home_pageframe_page;
         while (true) {
-            dbg.printf("loop", .{});
             for (&current_page.table) |*e| {
-                dbg.printf("loop2", .{});
                 if (e.type == .UNDEFINED) {
                     if (pnode != null) {
                         pnode.?.next = @constCast(e);
@@ -278,7 +276,7 @@ pub fn map_paddr_to_vaddr(phy: u64, virt: u64, pml5: ?[*]pageframe.PML5_entry) M
     if (pml5) |e| {
         pml = e;
     } else {
-        pml = pageframe.kernel_PML5_table;
+        pml = pageframe.kernel_PML4_table;
     }
     if (pml[expanded_vaddr.pml5].present == 0) {
         return error.PageDirNotMapped4;
@@ -310,55 +308,44 @@ pub const VaddrAllocationError = error{
 ///Allocates virtual address. it will find any virtual address that is already allocated but not mapped
 ///if kspace is set then allocation will only happen after the kernel high on error you should allocate more pageframes but
 ///you already don't have any preallocated space so you shall free some pages and then allocate more
-pub fn alloc_vaddr(pml: ?[*]pageframe.PML5_entry, kspace: bool, phy: u64) VaddrAllocationError!pageframe.virtual_address {
+pub fn alloc_vaddr(pml: ?[*]pageframe.PML4_entry, kspace: bool, phy: u64) VaddrAllocationError!pageframe.virtual_address {
     dbg.printf("allocating vaddr at 0x{x}\n", .{phy});
-    var pml5: [*]pageframe.PML5_entry = undefined;
+    var pml4: [*]pageframe.PML4_entry = undefined;
     if (pml) |l| {
-        pml5 = l;
-    } else pml5 = &pageframe.kernel_PML5_table;
+        pml4 = l;
+    } else pml4 = &pageframe.kernel_PML4_table;
     const min = if (kspace == true) pageframe.KERNEL_VHIGH else 0;
     const kernel_top_expand: pageframe.virtual_address = @bitCast(min); //NOTE: misleading variable name. it's just the expanded maximum address.
-    dbg.printf("5: {}, 4: {}, 3: {}, 2: {}, 1: {}, min: 0x{x}", .{ kernel_top_expand.pml5, kernel_top_expand.pml4, kernel_top_expand.pml3, kernel_top_expand.pml2, kernel_top_expand.pml1, min });
-    for (kernel_top_expand.pml5..512) |i| {
-        dbg.printf("i: {}, 0x{x}\n", .{ i, @as(usize, @bitCast(pml5[i])) });
-
-        if (pml5[i].present == 1) {
-            dbg.printf("present pml5 entry pointing to address: 0x{x}\n", .{pml5[i].addr});
-
-            const pml4: *[512]pageframe.PML4_entry = @ptrFromInt(pml5[i].addr);
-            dbg.printf("pml4 aquired: 0x{x}\n", .{@intFromPtr(pml4)});
-            for (0..512) |p4e| {
-                dbg.printf("pml4 looped\n{any}\n", .{pml4[0].addr});
-                if (pml4[p4e].present == 1) {
-                    dbg.printf("pml4 found: \n", .{});
-                    const pml3: [*]pageframe.PML3_entry = @ptrFromInt(pml4[p4e].addr);
-
-                    dbg.printf("pml3 aquired\n", .{});
-                    for (0..512) |p3e| {
-                        if (pml3[p3e].present == 1) {
-                            dbg.printf("pml3a: 0x{x}\n", .{pml3[p3e].addr});
-                            const pml2: [*]pageframe.PML2_entry = @ptrFromInt(pml3[p3e].addr);
-                            for (0..512) |p2e| {
-                                if (pml2[p2e].present == 1) {
-                                    dbg.printf("pml2a: 0x{x}\n", .{pml2[p2e].addr});
-                                    const pml1: [*]pageframe.PML1_entry = @ptrFromInt(pml2[p2e].addr);
-                                    for (0..512) |p1e| {
-                                        dbg.printf("p1e\n", .{});
-                                        if (pml1[p1e].present == 0) {
-                                            pml1[p1e].present = 1;
-                                            pml1[p1e].addr = @truncate(phy);
-                                            //page found
-                                            return pageframe.virtual_address{
-                                                .pml1 = @truncate(p1e),
-                                                .pml2 = @truncate(p2e),
-                                                .pml3 = @truncate(p3e),
-                                                .pml4 = @truncate(p4e),
-                                                .pml5 = @truncate(i),
-                                                .reserved = 0,
-                                                .offset = 0,
-                                            };
-                                        }
-                                    }
+    dbg.printf("4: {}, 3: {}, 2: {}, 1: {}, min: 0x{x}\n", .{ kernel_top_expand.pml4, kernel_top_expand.pml3, kernel_top_expand.pml2, kernel_top_expand.pml1, min });
+    for (kernel_top_expand.pml4..512) |p4e| {
+        dbg.printf("pml4 looped\n{any}\n", .{pml4[0].addr});
+        if (pml4[p4e].present == 1) {
+            dbg.printf("pml4 found: \n", .{});
+            const pml3: [*]pageframe.PML3_entry = @ptrFromInt(pml4[p4e].addr);
+            dbg.printf("pml3 aquired\n", .{});
+            for (0..512) |p3e| {
+                if (pml3[p3e].present == 1) {
+                    dbg.printf("pml3a: 0x{x}\n", .{pml3[p3e].addr});
+                    const pml2: [*]pageframe.PML2_entry = @ptrFromInt(pml3[p3e].addr);
+                    for (0..512) |p2e| {
+                        if (pml2[p2e].present == 1) {
+                            dbg.printf("pml2a: 0x{x}\n", .{pml2[p2e].addr});
+                            const pml1: [*]pageframe.PML1_entry = @ptrFromInt(pml2[p2e].addr);
+                            for (0..512) |p1e| {
+                                dbg.printf("p1e\n", .{});
+                                if (pml1[p1e].present == 0) {
+                                    pml1[p1e].present = 1;
+                                    pml1[p1e].addr = @truncate(phy);
+                                    //page found
+                                    return pageframe.virtual_address{
+                                        .pml1 = @truncate(p1e),
+                                        .pml2 = @truncate(p2e),
+                                        .pml3 = @truncate(p3e),
+                                        .pml4 = @truncate(p4e),
+                                        .pml5 = 0,
+                                        .reserved = 0,
+                                        .offset = 0,
+                                    };
                                 }
                             }
                         }
@@ -367,6 +354,7 @@ pub fn alloc_vaddr(pml: ?[*]pageframe.PML5_entry, kspace: bool, phy: u64) VaddrA
             }
         }
     }
+
     dbg.printf("vaddr allocation fail", .{});
     return error.OutOfMemory;
 }
