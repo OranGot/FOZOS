@@ -7,9 +7,6 @@ const idt = @import("arch/x64/interrupts/handle.zig");
 const pic = @import("drivers/pic/pic.zig");
 const pageframe = @import("arch/x64/paging/pageframe_allocator.zig");
 
-// The Limine requests can be placed anywhere, but it is important that
-// the compiler does not optimise them away, so, usually, they should
-// be made volatile or equivalent. In Zig, `export var` is what we use.
 pub export var framebuffer_request: limine.FramebufferRequest = .{};
 pub export var base_revision: limine.BaseRevision = .{ .revision = 2 };
 pub export var address_request: limine.KernelAddressRequest = .{};
@@ -44,9 +41,9 @@ export fn _start() callconv(.C) noreturn {
         tty.printf("kernel loaded at 0x{x}(physical base) and 0x{x}(virtual base)\n", .{ response.physical_base, response.virtual_base });
     }
     tty.printf("Interrupts setup\n", .{});
-    pageframe.setup();
     pageframe.print_mem();
-    pf.remap_stack(8);
+    pageframe.setup();
+    //    pf.remap_stack(8);
     pci.init_devices();
     //pf.dump_stack_values();
     const allocator = alloc.init();

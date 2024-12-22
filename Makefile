@@ -51,11 +51,11 @@ hdd:
 run:
 	qemu-system-x86_64   -drive id=disk,file=FOZOS.img,if=none,format=raw\
  -debugcon stdio -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -no-reboot -no-shutdown\
- -d mmu 
+ -d int
 run-dbg:
 	qemu-system-x86_64   -drive id=disk,file=FOZOS.img,if=none,format=raw\
  -debugcon stdio -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -no-reboot -no-shutdown\
- -d mmu  -s -S
+ -s -S
 dbg:
 	make hdd
 	make run-dbg

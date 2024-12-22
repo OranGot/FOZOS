@@ -19,7 +19,7 @@ pub const PML5_entry = packed struct(u64) {
 };
 pub const PML4_entry = packed struct(u64) {
     present: u1 = 0,
-    rw: u1 = 1,
+    rw: u1 = 0,
     us: u1 = 0,
     page_write_through: u1 = 0,
     cache_disable: u1 = 0,
@@ -33,7 +33,7 @@ pub const PML4_entry = packed struct(u64) {
 };
 pub const PML3_entry = packed struct(u64) {
     present: u1 = 0,
-    rw: u1 = 1,
+    rw: u1 = 0,
     us: u1 = 0,
     page_write_through: u1 = 0,
     cache_disable: u1 = 0,
@@ -47,7 +47,7 @@ pub const PML3_entry = packed struct(u64) {
 };
 pub const PML2_entry = packed struct(u64) {
     present: u1 = 0,
-    rw: u1 = 1,
+    rw: u1 = 0,
     us: u1 = 0,
     page_write_through: u1 = 0,
     cache_disable: u1 = 0,
@@ -61,7 +61,7 @@ pub const PML2_entry = packed struct(u64) {
 };
 pub const PML1_entry = packed struct(u64) {
     present: u1 = 0,
-    rw: u1 = 1,
+    rw: u1 = 0,
     us: u1 = 0,
     page_write_through: u1 = 0,
     cache_disable: u1 = 0,
@@ -77,11 +77,10 @@ pub const PML1_entry = packed struct(u64) {
 
 pub const PAGE_SIZE = 4096;
 var PAGING_LVLS = 5;
-//pub var kernel_PML5_table: [512]PML5_entry align(4096) = undefined;
-pub var kernel_PML4_table: [512]PML4_entry align(4096) = undefined;
-pub var kernel_PML3_table: [512]PML3_entry align(4096) = undefined;
-pub var kernel_PML2_table: [512]PML2_entry align(4096) = undefined;
-pub var kernel_PML1_table: [512]PML1_entry align(4096) = undefined;
+pub var kernel_PML4_table: *[512]PML4_entry align(4096) = undefined;
+pub var kernel_PML3_table: *[512]PML3_entry align(4096) = undefined;
+pub var kernel_PML2_table: *[512]PML2_entry align(4096) = undefined;
+pub var kernel_PML1_table: *[512]PML1_entry align(4096) = undefined;
 extern fn flush_cr3(val: u64) callconv(.C) void;
 //pub inline fn flush_cr3(val: u64) void {
 //    dbg.printf("value passed: 0x{x}\n", .{val});
@@ -96,41 +95,36 @@ pub const virtual_address = packed struct(u64) {
     pml2: u9,
     pml3: u9,
     pml4: u9,
-    pml5: u9,
-    reserved: u7,
+    reserved: u16 = 0,
 };
 pub var HHDM_OFFSET: usize = 0;
+const TARGET_VBASE: usize = 0xffffffff80000000;
 pub export var hhdm_request: limine.HhdmRequest = .{};
 fn remap_kernel(kphybase: u64) void {
-    const expanded_target_address: virtual_address = @bitCast(HHDM_OFFSET);
-    //kernel_PML5_table[expanded_target_address.pml5] = PML5_entry{
-    //    .present = 1,
-    //    .addr = @truncate(@intFromPtr(&kernel_PML4_table)),
-    //    .rw = 1,
-    //};
+    const expanded_target_address: virtual_address = @bitCast(TARGET_VBASE);
+    dbg.printf("target: {any}\n", .{expanded_target_address});
     kernel_PML4_table[expanded_target_address.pml4] = PML4_entry{
         .present = 1,
-        .addr = @truncate(@intFromPtr(&kernel_PML3_table)),
+        .addr = @truncate(@intFromPtr(kernel_PML3_table) - HHDM_OFFSET),
         .rw = 1,
     };
-
     kernel_PML3_table[expanded_target_address.pml3] = PML3_entry{
         .present = 1,
-        .addr = @truncate(@intFromPtr(&kernel_PML2_table)),
+        .addr = @truncate(@intFromPtr(kernel_PML2_table) - HHDM_OFFSET),
         .rw = 1,
     };
 
-    dbg.printf("page tables setting\n", .{});
     kernel_PML2_table[expanded_target_address.pml2] = PML2_entry{
         .present = 1,
-        .addr = @truncate(@intFromPtr(&kernel_PML1_table)),
+        .addr = @truncate(@intFromPtr(kernel_PML1_table) - HHDM_OFFSET),
         .rw = 1,
     };
     dbg.printf("page tables set\n", .{});
-    var vaddr: u64 = HHDM_OFFSET;
+    var vaddr: u64 = TARGET_VBASE;
     var phy: u64 = kphybase;
     var ctr: usize = 0;
-    while (vaddr < KERNEL_VHIGH) {
+    while (vaddr <= KERNEL_VHIGH) {
+        dbg.printf("loaded vaddr: 0x{x}", .{vaddr});
         const ivirt: virtual_address = @bitCast(vaddr);
         kernel_PML1_table[ivirt.pml1] = PML1_entry{
             .present = 1,
@@ -141,34 +135,10 @@ fn remap_kernel(kphybase: u64) void {
         phy += PAGE_SIZE;
         //dbg.printf("entry: {} at PML1[{}]\n", .{ ctr, ivirt.pml1 });
         ctr += 1;
-        if (HHDM_OFFSET + PAGE_SIZE * 512 == vaddr) @panic("kernel too big \n");
+        if (TARGET_VBASE + PAGE_SIZE * 512 == vaddr) @panic("kernel too big \n");
     }
-    //dbg.printf("getting initial pml5\n", .{});
-    //const initial_pml5: usize = asm volatile (
-    //    \\movq %cr3, %rax
-    //    : [o] "=rax" (-> usize),
-    //    :
-    //    : "rax"
-    //) & 0xFFFFFFFFFFFFF000;
-    //dbg.printf("got initial pml5 0x{X}\n", .{initial_pml5});
-    //const lpml5: *[512]PML5_entry = @ptrFromInt(initial_pml5);
-    //const exp_addr: virtual_address = @bitCast(@intFromPtr(&kernel_PML5_table));
-    //const lpml4: *[512]PML4_entry = @ptrFromInt(lpml5[exp_addr.pml5].addr);
-    //const lpml3: *[512]PML3_entry = @ptrFromInt(lpml4[exp_addr.pml4].addr);
-
-    //const lpml2: *[512]PML2_entry = @ptrFromInt(lpml3[exp_addr.pml3].addr);
-    //const lpml1: *[512]PML1_entry = @ptrFromInt(lpml2[exp_addr.pml2].addr);
-    const finaddr: usize = @intFromPtr(&kernel_PML4_table) - HHDM_OFFSET;
-    dbg.printf("cr3 is going to be : 0x{x}. kernel PML4 table is located at 0x{x}\n", .{ finaddr, @intFromPtr(&kernel_PML4_table) });
-    dump_stack_values();
-    flush_cr3(finaddr);
-    var cr3: usize = 0;
-    asm volatile ("mov %[out], %cr3"
-        : [out] "=r" (cr3),
-    );
-
-    dbg.printf("cr3 flushed: 0x{x}\n", .{cr3});
 }
+const tty = @import("../../../drivers/tty/tty.zig");
 pub var KERNEL_PHY_HIGH: u64 = 0;
 pub var KERNEL_VBASE: u64 = 0;
 pub var KERNEL_PHY_BASE: u64 = 0;
@@ -178,17 +148,21 @@ pub fn setup_paging(kphybase: u64, kphy_high: u64) void {
         dbg.printf("offset is 0x{x}\n", .{d.offset});
         HHDM_OFFSET = d.offset;
     } else @panic("limine hhdm request failed");
-    dbg.printf("kphyhigh: 0x{x} kphybase: 0x{x}, target vbase: 0x{x}\n", .{ kphy_high, kphybase, HHDM_OFFSET });
+    dbg.printf("kphyhigh: 0x{x} kphybase: 0x{x}, target vbase: 0x{x}\n", .{ kphy_high, kphybase, TARGET_VBASE });
     KERNEL_PHY_HIGH = kphy_high + kphybase;
-    KERNEL_VBASE = HHDM_OFFSET;
+    KERNEL_VBASE = TARGET_VBASE;
     KERNEL_PHY_BASE = kphybase;
-    KERNEL_VHIGH = kphy_high + HHDM_OFFSET;
-    dbg.printf("variables set\n", .{});
+    KERNEL_VHIGH = kphy_high + TARGET_VBASE;
+    const pbase = palloc.request_pages(4, 0) catch |e| {
+        tty.printf("allocatioin error: {}\n", .{e});
+        @panic("Initial pml allocations failed");
+    };
+    kernel_PML1_table = @ptrFromInt(pbase + HHDM_OFFSET);
+    kernel_PML2_table = @ptrFromInt(pbase + PAGE_SIZE + HHDM_OFFSET);
+    kernel_PML3_table = @ptrFromInt(pbase + PAGE_SIZE * 2 + HHDM_OFFSET);
+    kernel_PML4_table = @ptrFromInt(pbase + PAGE_SIZE * 3 + HHDM_OFFSET);
     //setting up page tables
     for (0..512) |i| {
-        //kernel_PML5_table[i] = PML5_entry{
-        //    .present = 0,
-        //};
         kernel_PML4_table[i] = PML4_entry{
             .present = 0,
         };
@@ -203,6 +177,12 @@ pub fn setup_paging(kphybase: u64, kphy_high: u64) void {
         };
     }
     remap_kernel(kphybase);
+    dbg.printf("cr3 is going to be : 0x{x}. kernel PML4 table is located at 0x{x}\n", .{ pbase + PAGE_SIZE * 3, @intFromPtr(kernel_PML4_table) });
+    //for (0..512) |e| {
+    //dbg.printf("entry {}, PML4: {x}, PML3: {x}, PML2: {x}, PML1: {x}\n", .{ e, @as(usize, @bitCast(kernel_PML4_table[e])), @as(usize, @bitCast(kernel_PML3_table[e])), @as(usize, @bitCast(kernel_PML2_table[e])), @as(usize, @bitCast(kernel_PML1_table[e])) });
+    //}
+    flush_cr3(pbase + PAGE_SIZE * 3);
+    dbg.printf("cr3 flushed!\n", .{});
 }
 const palloc = @import("pageframe_allocator.zig");
 ///This function maps extra pages after the kernel to map stack

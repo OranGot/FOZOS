@@ -32,6 +32,8 @@ pub fn print_mem() void {
 }
 pub fn setup() void {
     var ctr: usize = 0;
+    var kbase: usize = 0;
+    var klen: usize = 0;
     if (mmap_request.response) |r| {
         for (r.entries()) |i| {
             home_pageframe_page.table[ctr] = list_entry{
@@ -43,9 +45,8 @@ pub fn setup() void {
                     limine.MemoryMapEntryType.acpi_reclaimable => list_entry_type.FREE,
                     limine.MemoryMapEntryType.bootloader_reclaimable => list_entry_type.FREE,
                     limine.MemoryMapEntryType.kernel_and_modules => d: {
-                        dbg.printf("setting up paging kernel length: 0x{x}\n", .{i.length});
-                        pageframe.setup_paging(i.base, i.length);
-                        dbg.printf("paging set up\n", .{});
+                        klen = i.length;
+                        kbase = i.base;
                         break :d list_entry_type.NO_FREE_RESERVED;
                     },
                     else => list_entry_type.NO_FREE_RESERVED,
@@ -61,7 +62,10 @@ pub fn setup() void {
         home_pageframe_page.table[a].type = .UNDEFINED;
         home_pageframe_page.table[a].next = null;
     }
+    dbg.printf("setting up paging kernel length: 0x{x}\n", .{klen});
+    pageframe.setup_paging(kbase, klen);
 }
+
 pub const PageRequestError = error{
     OutOfMemory,
     InPageAllocFail,
@@ -71,7 +75,8 @@ pub fn request_pages(pageno: u64, base: usize) PageRequestError!usize {
     var current_node: *list_entry = &home_pageframe_page.table[0];
     var last_node: ?*list_entry = null;
     while (true) {
-        if (current_node.type == .FREE and current_node.high >= base + pageno * PAGE_SIZE and current_node.base <= base) {
+        dbg.printf("current node: {any}\n", .{current_node});
+        if (current_node.type == .FREE and current_node.high >= base + pageno * PAGE_SIZE and (base == 0 or current_node.base <= base)) {
             return allocate_pages_in_node(pageno, current_node, last_node) catch return error.InPageAllocFail;
         }
         last_node = current_node;
@@ -308,12 +313,12 @@ pub const VaddrAllocationError = error{
 ///Allocates virtual address. it will find any virtual address that is already allocated but not mapped
 ///if kspace is set then allocation will only happen after the kernel high on error you should allocate more pageframes but
 ///you already don't have any preallocated space so you shall free some pages and then allocate more
-pub fn alloc_vaddr(pml: ?[*]pageframe.PML4_entry, kspace: bool, phy: u64) VaddrAllocationError!pageframe.virtual_address {
+pub fn alloc_vaddr(pml: ?*[512]pageframe.PML4_entry, kspace: bool, phy: u64) VaddrAllocationError!pageframe.virtual_address {
     dbg.printf("allocating vaddr at 0x{x}\n", .{phy});
     var pml4: [*]pageframe.PML4_entry = undefined;
     if (pml) |l| {
         pml4 = l;
-    } else pml4 = &pageframe.kernel_PML4_table;
+    } else pml4 = pageframe.kernel_PML4_table;
     const min = if (kspace == true) pageframe.KERNEL_VHIGH else 0;
     const kernel_top_expand: pageframe.virtual_address = @bitCast(min); //NOTE: misleading variable name. it's just the expanded maximum address.
     dbg.printf("4: {}, 3: {}, 2: {}, 1: {}, min: 0x{x}\n", .{ kernel_top_expand.pml4, kernel_top_expand.pml3, kernel_top_expand.pml2, kernel_top_expand.pml1, min });
@@ -342,7 +347,6 @@ pub fn alloc_vaddr(pml: ?[*]pageframe.PML4_entry, kspace: bool, phy: u64) VaddrA
                                         .pml2 = @truncate(p2e),
                                         .pml3 = @truncate(p3e),
                                         .pml4 = @truncate(p4e),
-                                        .pml5 = 0,
                                         .reserved = 0,
                                         .offset = 0,
                                     };
