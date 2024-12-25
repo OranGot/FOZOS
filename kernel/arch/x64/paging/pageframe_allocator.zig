@@ -41,10 +41,10 @@ pub fn setup() void {
                 .base = i.base,
                 .high = i.base + i.length,
                 .type = switch (i.kind) {
-                    limine.MemoryMapEntryType.usable => list_entry_type.FREE,
-                    limine.MemoryMapEntryType.acpi_reclaimable => list_entry_type.FREE,
-                    limine.MemoryMapEntryType.bootloader_reclaimable => list_entry_type.FREE,
-                    limine.MemoryMapEntryType.kernel_and_modules => d: {
+                    .usable => list_entry_type.FREE,
+                    .acpi_reclaimable => list_entry_type.FREE,
+                    // .bootloader_reclaimable => list_entry_type.FREE,
+                    .kernel_and_modules => d: {
                         klen = i.length;
                         kbase = i.base;
                         break :d list_entry_type.NO_FREE_RESERVED;
@@ -275,50 +275,50 @@ const MappingError = error{
     PageDirNotMapped1,
 };
 
-pub fn map_paddr_to_vaddr(phy: u64, virt: u64, pml5: ?[*]pageframe.PML5_entry) MappingError!void {
-    const expanded_vaddr: pageframe.virtual_address = @bitCast(virt);
-    var pml: [*]pageframe.PML5_entry = undefined;
-    if (pml5) |e| {
-        pml = e;
-    } else {
-        pml = pageframe.kernel_PML4_table;
-    }
-    if (pml[expanded_vaddr.pml5].present == 0) {
-        return error.PageDirNotMapped4;
-    }
-    const pml4: [*]pageframe.PML4_entry = @ptrFromInt(pml[expanded_vaddr.pml5].addr);
-
-    if (pml4[expanded_vaddr.pml4].present == 0) {
-        return error.PageDirNotMapped3;
-    }
-    const pml3: [*]pageframe.PML3_entry = @ptrFromInt(pml4[expanded_vaddr.pml4].addr);
-
-    if (pml4[expanded_vaddr.pml3].present == 0) {
-        return error.PageDirNotMapped2;
-    }
-    const pml2: [*]pageframe.PML2_entry = @ptrFromInt(pml3[expanded_vaddr.pml3].addr);
-
-    if (pml4[expanded_vaddr.pml2].present == 0) {
-        return error.PageDirNotMapped1;
-    }
-    const pml1: [*]pageframe.PML1_entry = @ptrFromInt(pml2[expanded_vaddr.pml2].addr);
-    if (pml1[expanded_vaddr.pml1].present != 1) {
-        pml1[expanded_vaddr.pml1].addr = phy;
-    } else return error.PageAlreadyMapped;
-}
+// pub fn map_paddr_to_vaddr(phy: u64, virt: u64, pml5: ?[*]pageframe.PML5_entry) MappingError!void {
+//     const expanded_vaddr: pageframe.virtual_address = @bitCast(virt);
+//     var pml: [*]pageframe.PML5_entry = undefined;
+//     if (pml5) |e| {
+//         pml = e;
+//     } else {
+//         pml = pageframe.kernel_PML4_table;
+//     }
+//     if (pml[expanded_vaddr.pml5].present == 0) {
+//         return error.PageDirNotMapped4;
+//     }
+//     const pml4: [*]pageframe.PML4_entry = @ptrFromInt(pml[expanded_vaddr.pml5].addr);
+//
+//     if (pml4[expanded_vaddr.pml4].present == 0) {
+//         return error.PageDirNotMapped3;
+//     }
+//     const pml3: [*]pageframe.PML3_entry = @ptrFromInt(pml4[expanded_vaddr.pml4].addr);
+//
+//     if (pml4[expanded_vaddr.pml3].present == 0) {
+//         return error.PageDirNotMapped2;
+//     }
+//     const pml2: [*]pageframe.PML2_entry = @ptrFromInt(pml3[expanded_vaddr.pml3].addr);
+//
+//     if (pml4[expanded_vaddr.pml2].present == 0) {
+//         return error.PageDirNotMapped1;
+//     }
+//     const pml1: [*]pageframe.PML1_entry = @ptrFromInt(pml2[expanded_vaddr.pml2].addr);
+//     if (pml1[expanded_vaddr.pml1].present != 1) {
+//         pml1[expanded_vaddr.pml1].addr = phy;
+//     } else return error.PageAlreadyMapped;
+// }
 pub const VaddrAllocationError = error{
     OutOfMemory,
 };
-
+extern fn get_cr3() u64;
 ///Allocates virtual address. it will find any virtual address that is already allocated but not mapped
 ///if kspace is set then allocation will only happen after the kernel high on error you should allocate more pageframes but
 ///you already don't have any preallocated space so you shall free some pages and then allocate more
-pub fn alloc_vaddr(pml: ?*[512]pageframe.PML4_entry, kspace: bool, phy: u64) VaddrAllocationError!pageframe.virtual_address {
+pub fn alloc_vaddr(pml: ?[*]pageframe.PML4_entry, kspace: bool, phy: u64) VaddrAllocationError!pageframe.virtual_address {
     dbg.printf("allocating vaddr at 0x{x}\n", .{phy});
     var pml4: [*]pageframe.PML4_entry = undefined;
     if (pml) |l| {
         pml4 = l;
-    } else pml4 = pageframe.kernel_PML4_table;
+    } else pml4 = @ptrFromInt(get_cr3());
     const min = if (kspace == true) pageframe.KERNEL_VHIGH else 0;
     const kernel_top_expand: pageframe.virtual_address = @bitCast(min); //NOTE: misleading variable name. it's just the expanded maximum address.
     dbg.printf("4: {}, 3: {}, 2: {}, 1: {}, min: 0x{x}\n", .{ kernel_top_expand.pml4, kernel_top_expand.pml3, kernel_top_expand.pml2, kernel_top_expand.pml1, min });

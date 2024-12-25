@@ -1,6 +1,8 @@
 .global flush_cr3
 flush_cr3:
-	cli
 	movq %rdi, %cr3
-	sti	
+	retq
+.global get_cr3
+get_cr3:
+	movq %cr3, %rax
 	retq
