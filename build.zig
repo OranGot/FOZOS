@@ -27,7 +27,6 @@ pub fn build(b: *std.Build) void {
         .code_model = code_model,
     });
     kernel.addObjectFile(b.path("obj/idt.o"));
-    kernel.addAssemblyFile(b.path("kernel/arch/x64/paging/flush.s"));
     kernel.addCSourceFile(.{
         .file = b.path("kernel/arch/x64/interrupts/idt.c"),
         .flags = &[_][]const u8{"-std=c99"},

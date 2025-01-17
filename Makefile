@@ -36,7 +36,6 @@ clean:
 hdd:
 	#nasm kernel/arch/x64/interrupts/idt.s -o obj/idt.o -f elf64
 	clang -c -masm=intel kernel/arch/x64/interrupts/idt.S -o obj/idt.o
-	zig build
 	rm -f FOZOS.img
 	dd if=/dev/zero bs=1M count=0 seek=64 of=FOZOS.img
 	sgdisk FOZOS.img -n 1:2048 -t 1:ef00
@@ -55,10 +54,12 @@ run:
 run-dbg:
 	qemu-system-x86_64   -drive id=disk,file=FOZOS.img,if=none,format=raw\
  -debugcon stdio -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -no-reboot -no-shutdown\
- -s -S
+ -s -S -d int,mmu
 dbg:
+	zig build -Doptimize=Debug
 	make hdd
 	make run-dbg
 img: 
+	zig build
 	make hdd 
 	make run

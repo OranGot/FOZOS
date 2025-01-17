@@ -4,7 +4,8 @@ const io = @import("std").io;
 const fmt = @import("std").fmt;
 const num = @import("../../util/num.zig");
 const dbg = @import("../dbg/dbg.zig");
-var framebuffer: *limine.Framebuffer = undefined;
+const vmm = @import("../../arch/x64/paging/vmm.zig");
+pub var framebuffer: limine.Framebuffer = undefined;
 const SPACES_PER_TAB: u16 = 4;
 const FONT_CHARS_PER_LINE: u16 = 8;
 const FONT_CHARS_PER_COL: u16 = 8;
@@ -22,7 +23,8 @@ fn callback(_: void, string: []const u8) error{}!usize {
     return string.len;
 }
 pub fn initialise_tty(response: *limine.FramebufferResponse) void {
-    framebuffer = response.framebuffers()[0];
+    dbg.printf("tty at 0x{X}\nInfo: {any}", .{ @intFromPtr(response.framebuffers_ptr[0]), response.framebuffers_ptr[0] });
+    framebuffer = response.framebuffers()[0].*;
     LINESIZE = framebuffer.width;
     COLSIZE = framebuffer.height;
 }
@@ -83,4 +85,13 @@ fn draw_char(c: u8) void {
 }
 pub fn printf(comptime format: []const u8, args: anytype) void {
     fmt.format(tty_writer, format, args) catch unreachable;
+}
+const palloc = @import("../../arch/x64/paging/pageframe_allocator.zig");
+const pageframe = @import("../../arch/x64/paging/pageframe.zig");
+pub fn map_framebuffer(fbstart: usize, fblen: usize) void {
+    dbg.printf("fbstart: 0x{X}, fblen: 0x{X}\n", .{ fbstart, fblen });
+    const addr = vmm.home_freelist.alloc_vaddr(fblen / pageframe.PAGE_SIZE, fbstart, true) orelse @panic("TTY mapping failed\n");
+    dbg.printf("remapped to address: 0x{X}\n", .{addr});
+    framebuffer.address = @ptrFromInt(addr);
+    framebuffer.edid = null; //unused
 }
