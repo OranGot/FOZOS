@@ -50,16 +50,19 @@ hdd:
 run:
 	qemu-system-x86_64   -drive id=disk,file=FOZOS.img,if=none,format=raw\
  -debugcon stdio -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -no-reboot -no-shutdown\
- -d int,mmu
+
+run-nvme:
+	qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd -drive id=nvme0,file=FOZOS.img,if=none,format=raw -debugcon stdio -device nvme,serial=deadbeef,drive=nvme0 -m 2G -no-reboot -no-shutdown
+
 run-dbg:
 	qemu-system-x86_64   -drive id=disk,file=FOZOS.img,if=none,format=raw\
  -debugcon stdio -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -no-reboot -no-shutdown\
  -s -S -d int,mmu
 dbg:
-	zig build -Doptimize=Debug
+	zig build -Doptimise=Debug
 	make hdd
 	make run-dbg
 img: 
 	zig build
 	make hdd 
-	make run
+	make run-nvme

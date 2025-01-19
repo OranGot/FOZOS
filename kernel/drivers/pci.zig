@@ -56,7 +56,7 @@ pub fn init_devices() void {
                 0x1 => {
                     switch (config_read_word(@truncate(bus), @truncate(dev), 0, PCI_SUBCLASS)) {
                         0x7 => {
-                            tty.printf("found an NVMe controller", .{});
+                            tty.printf("found an NVMe controller\n", .{});
                         },
                         else => tty.printf("unknown subclass of mass storage pci device {},{}: 0x{x}", .{ bus, dev, config_read_word(@truncate(bus), @truncate(dev), 0, PCI_SUBCLASS) }),
                     }

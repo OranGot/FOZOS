@@ -223,19 +223,7 @@ inline fn map_ktables(pbase: usize) void {
     kernel_PML4_table = @ptrFromInt(KERNEL_VHIGH + PAGE_SIZE * 4);
     KERNEL_VHIGH += PAGE_SIZE * 4;
 }
-// inline fn map_framebuffer(fbstart: usize, fblen: usize) void {
-//     dbg.printf("fbstart: 0x{x}, fblen: 0x{x}\n", .{ fbstart, fblen });
-//     var offset: u32 = 0;
-//     if (@as(virtual_address, @bitCast(KERNEL_VHIGH + DEFAULT_STACK_SIZE)).pml2 != @as(virtual_address, @bitCast(KERNEL_VHIGH + DEFAULT_STACK_SIZE + fblen)).pml2) {}
-//     for (@as(virtual_address, @bitCast(KERNEL_VHIGH + DEFAULT_STACK_SIZE)).pml1..@as(virtual_address, @bitCast(KERNEL_VHIGH + DEFAULT_STACK_SIZE + fblen)).pml1) |i| {
-//         dbg.printf("i: {}\n", .{i});
-//         kernel_PML1_table[i] = PML1_entry{ .present = 1, .addr = @truncate(((fbstart) >> 12) + offset) };
-//         offset += 1;
-//     }
-//     dbg.printf("s\n", .{});
-//     tty.framebuffer.address = @ptrFromInt((KERNEL_VHIGH + DEFAULT_STACK_SIZE) + (@intFromPtr(tty.framebuffer.address) - HHDM_OFFSET - fbstart));
-//     dbg.printf("address: 0x{x}", .{@intFromPtr(tty.framebuffer.address)});
-// }
+
 inline fn flush(cr3: usize, rbp: usize, rsp: usize) void {
     asm volatile (
         \\movq %[cr3], %cr3

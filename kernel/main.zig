@@ -38,8 +38,8 @@ export fn _start() callconv(.C) noreturn {
 
     tty.printf("pageframe setup\n", .{});
     tty.printf("paging fully set up\n", .{});
+    @import("arch/x64/gdt/gdt.zig").setup_gdt();
     idt.init();
-
     //tty.printf("IDT set up\n", .{});
     pic.PIC_remap(0x20, 0x20 + 8);
     //pic.IRQ_clear_mask(1);
