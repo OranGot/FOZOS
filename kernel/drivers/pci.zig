@@ -73,7 +73,6 @@ pub fn init_devices() void {
                         0x8 => {
                             tty.printf("found an NVMe controller\n", .{});
                             _ = @import("storage/NVMe/nvme.zig").init(@truncate(bus), @truncate(dev));
-                            @panic("testing");
                         },
                         else => tty.printf("unknown subclass of mass storage pci device {},{}: 0x{x}", .{ bus, dev, subclass }),
                     }

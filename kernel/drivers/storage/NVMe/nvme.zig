@@ -345,7 +345,7 @@ pub const NVMe = struct {
         //creating io sq
         const paddr = pf.request_pages(2) orelse return error.Fail;
         const vaddr = vmm.home_freelist.alloc_vaddr(2, paddr, true, vmm.CACHE_DISABLE | vmm.PRESENT | vmm.RW | vmm.XD) orelse return error.Fail;
-        dbg.printf("creating IO completion queue\n", .{});
+        // dbg.printf("creating IO completion queue\n", .{});
         _ = self.send_admin_cmd(SubQEntry{
             .cmd = .{
                 .opcode = 0x5,
@@ -357,7 +357,7 @@ pub const NVMe = struct {
         }) catch |e| return e;
         self.isq_tail_doorbell = @ptrFromInt(self.vbase + 0x1000 + self.doorbell_stride * (2 * queue_id));
         self.icq_head_doorbell = @ptrFromInt(self.vbase + 0x1000 + self.doorbell_stride * (2 * queue_id + 1));
-        dbg.printf("isq tail doorbell: 0x{X}, icq tail doorbell: 0x{X}, asq tail doorbell: 0x{X}, acq head doorbell: 0x{X}\n", .{ self.isq_tail_doorbell, self.icq_head_doorbell, self.asq_tail_doorbell, self.acq_head_doorbell });
+        // dbg.printf("isq tail doorbell: 0x{X}, icq tail doorbell: 0x{X}, asq tail doorbell: 0x{X}, acq head doorbell: 0x{X}\n", .{ self.isq_tail_doorbell, self.icq_head_doorbell, self.asq_tail_doorbell, self.acq_head_doorbell });
         self.io_sq.tail = 0;
         self.io_cq.tail = 0;
         self.io_sq.addr = vaddr;
@@ -368,7 +368,7 @@ pub const NVMe = struct {
         self.io_cq.size = DEFAULT_ADMIN_QUEUE_SIZE;
         self.io_sq.esize = @sizeOf(SubQEntry);
         self.io_cq.esize = @sizeOf(ComplQEntry);
-        dbg.printf("creating IO submission queue\n", .{});
+        // dbg.printf("creating IO submission queue\n", .{});
 
         _ = self.send_admin_cmd(SubQEntry{
             .cmd = .{
@@ -379,7 +379,7 @@ pub const NVMe = struct {
             .cmd_spec11 = (queue_id << 16) | 1,
             .cmd_spec10 = ((DEFAULT_ADMIN_QUEUE_SIZE - 1) << 16) | queue_id,
         }) catch |e| return e;
-        dbg.printf("cq: {any}, sq: {any}, {*}, {*}\n", .{ self.io_cq, self.io_sq, self.icq_head_doorbell, self.isq_tail_doorbell });
+        // dbg.printf("cq: {any}, sq: {any}, {*}, {*}\n", .{ self.io_cq, self.io_sq, self.icq_head_doorbell, self.isq_tail_doorbell });
     }
     fn aquire_reg(self: *NVMe, offset: usize) ?usize {
         if (offset > 0x1000 * PREALLOCATED_PAGES) {
@@ -476,14 +476,14 @@ pub const NVMe = struct {
     }
 
     inline fn reset_controller(self: *NVMe) ?void {
-        dbg.printf("Starting NVMe controller reset\n", .{});
+        // dbg.printf("Starting NVMe controller reset\n", .{});
         const cc: *ControllerConfig = @ptrFromInt(self.aquire_reg(0x14) orelse return null);
         const csts: *ControllerStatus = @ptrFromInt(self.aquire_reg(0x1C) orelse return null);
         const lCAP: *CAP = @ptrFromInt(self.aquire_reg(0x0) orelse return null);
         // dbg.printf("resetting controller\n", .{});
-        dbg.printf("CAP before reset: {any}\n", .{lCAP});
+        // dbg.printf("CAP before reset: {any}\n", .{lCAP});
         // dbg.printf("controller status: {any}\n", .{csts});
-        dbg.printf("controller config before reset: {any}\n", .{cc});
+        // dbg.printf("controller config before reset: {any}\n", .{cc});
         cc.enable = false;
         var timeout: usize = 0;
         while (csts.ready != false) {
@@ -529,13 +529,13 @@ pub inline fn init(bus: u8, dev: u8) ?*NVMe {
     const lNVMe: *NVMe = alloc.gl_alloc.create(NVMe) catch return null;
     const bar0: u32 = pci.config_read_dword(bus, dev, 0, pci.PCI_BAR0);
     const bar1: u32 = pci.config_read_dword(bus, dev, 0, pci.PCI_BAR1);
-    dbg.printf("bar0: 0x{X}, bar1: 0x{X}\n", .{ bar0, bar1 });
+    // dbg.printf("bar0: 0x{X}, bar1: 0x{X}\n", .{ bar0, bar1 });
     lNVMe.base = @as(u64, @intCast(bar0 & 0xFFFFFFF0)) | (@as(u64, @intCast(bar1)) << 32);
     lNVMe.cap_str = (lNVMe.base >> 12) & 0xF;
     lNVMe.cmd_id = 0;
-    dbg.printf("cap stride: 0x{x}\n", .{lNVMe.cap_str});
+    // dbg.printf("cap stride: 0x{x}\n", .{lNVMe.cap_str});
     lNVMe.vbase = vmm.home_freelist.alloc_vaddr(PREALLOCATED_PAGES, lNVMe.base, true, vmm.PRESENT | vmm.CACHE_DISABLE | vmm.RW | vmm.XD) orelse return null;
-    dbg.printf("vbase: 0x{X}\n", .{lNVMe.vbase});
+    // dbg.printf("vbase: 0x{X}\n", .{lNVMe.vbase});
     lNVMe.reset_controller() orelse return null;
     const lCAP: *CAP = @ptrFromInt(lNVMe.aquire_reg(0x0) orelse return null);
     if (lCAP.command_sets_supported >> 7 != 0) {
@@ -550,8 +550,9 @@ pub inline fn init(bus: u8, dev: u8) ?*NVMe {
         dbg.printf("error creating io queues: {}\n", .{e});
         return null;
     };
-    dbg.printf("First block: {s}", .{lNVMe.read(0, 1, true) catch return null});
-    dbg.printf("Second block: {s}", .{lNVMe.read(1, 1, true) catch return null});
-    dbg.printf("base: 0x{X}\n", .{lNVMe.base});
+    // dbg.printf("First block: {s}", .{lNVMe.read(0, 1, true) catch return null});
+    // dbg.printf("Second block: {s}", .{lNVMe.read(1, 1, true) catch return null});
+    // dbg.printf("base: 0x{X}\n", .{lNVMe.base});
+    tty.printf("NVMe initialisation finished\n", .{});
     return lNVMe;
 }
