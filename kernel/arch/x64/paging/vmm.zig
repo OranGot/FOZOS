@@ -20,6 +20,14 @@ pub const VmmFreeListEntryType = enum(u8) {
     UNDEFINED = 0,
     RESTRICTED = 5, //This is only for 0x0 - 0x1000 area of memory. For null deref to crash
 };
+pub const PRESENT = 1;
+pub const RW = 1 << 1;
+pub const US = 1 << 2;
+pub const PWT = 1 << 3;
+pub const CACHE_DISABLE = 1 << 4;
+pub const GLOBAL = 1 << @bitOffsetOf(pf.PML1_entry, "global");
+pub const PK = 1 << @bitOffsetOf(pf.PML1_entry, "PK");
+pub const XD = 1 << @bitOffsetOf(pf.PML1_entry, "XD");
 const dbg = @import("../../../drivers/dbg/dbg.zig");
 const pio = @import("../../../drivers/drvlib/drvcmn.zig");
 pub const VmmEntryTable = extern struct {
@@ -45,7 +53,6 @@ pub const VmmFreeList = extern struct {
         var current_entry: *VmmFreeListEntry = &self.first.t[0];
         var ctr: usize = 0;
         while (true) {
-            // dbg.printf("\n {} Current entry {any}\n", .{ ctr, current_entry });
             if (current_entry.pbase <= paddr and current_entry.len + current_entry.pbase >= paddr and current_entry.mapped != false) {
                 return paddr - current_entry.pbase + current_entry.vbase;
             }
@@ -57,7 +64,7 @@ pub const VmmFreeList = extern struct {
     }
     /// NOTE: this only works if page is mapped into virtual memory otherwise this fails.
     /// The other reason why this could fail is if there is no more memory left
-    pub fn alloc_vaddr(self: *VmmFreeList, pageno: usize, paddr: usize, kspace: bool) ?usize {
+    pub fn alloc_vaddr(self: *VmmFreeList, pageno: usize, paddr: usize, kspace: bool, flags: usize) ?usize {
         const pml4: [*]pf.PML4_entry = @ptrFromInt(self.paddr_to_vaddr(self.cr3) orelse return null);
         var min: pf.virtual_address = @bitCast(@as(usize, 0));
         if (kspace == true) {
@@ -83,7 +90,7 @@ pub const VmmFreeList = extern struct {
                             if (curfit != 0 and pml2[p2e].present == 0) { // attempt to allocate more pml2s
                                 const pfpaddr = palloc.request_pages(1) orelse return null;
 
-                                const pfvaddr = self.alloc_vaddr(1, pfpaddr, true) orelse return null;
+                                const pfvaddr = self.alloc_vaddr(1, pfpaddr, true, PRESENT | RW | XD) orelse return null;
                                 const npml1: [*]pf.PML1_entry = @ptrFromInt(pfvaddr);
                                 for (0..512) |e| {
                                     npml1[e] = pf.PML1_entry{
@@ -93,7 +100,7 @@ pub const VmmFreeList = extern struct {
                                 }
                                 pml2[p2e].present = 1;
                                 pml2[p2e].addr = @truncate(pfpaddr >> 12);
-                                return self.alloc_vaddr(pageno, paddr, kspace);
+                                return self.alloc_vaddr(pageno, paddr, kspace, PRESENT | RW | XD);
                             }
 
                             if (pml2[p2e].present == 1) {
@@ -105,9 +112,7 @@ pub const VmmFreeList = extern struct {
                                 var p1e: u16 = 0;
 
                                 p1: while (p1e < 512) : (p1e += 1) {
-                                    //dbg.printf("Checked pml1 entry: {}\n", .{p1e});
                                     if (pml1[p1e].present == 0) {
-                                        //dbg.printf("Appropriate pml1 entry found {}\n", .{p1e});
                                         const addr = @as(usize, @bitCast(pf.virtual_address{
                                             .pml1 = @truncate(p1e),
                                             .pml2 = @truncate(p2e),
@@ -140,19 +145,16 @@ pub const VmmFreeList = extern struct {
                                                 } else if (l_addr.pml2 != p_addr.pml2) {
                                                     pml1 = @ptrFromInt(self.paddr_to_vaddr(pml2[l_addr.pml2].addr << 12) orelse return null);
                                                 }
-                                                //dbg.printf("original entry: {any}, {}\n", .{ pml1[l_addr.pml1], l_addr.pml1 });
                                                 if (pml1[l_addr.pml1].present == 1) {
-                                                    dbg.printf("entry: {any} has present bit set\nat address: 0x{x}\n", .{ l_addr, @as(usize, @bitCast(l_addr)) });
                                                     return null;
                                                 }
                                                 pml1[l_addr.pml1].addr = @truncate((paddr + i * pf.PAGE_SIZE) >> 12);
-                                                pml1[l_addr.pml1].rw = 1;
-                                                pml1[l_addr.pml1].present = 1;
+                                                pml1[l_addr.pml1] = @as(pf.PML1_entry, @bitCast(@as(usize, @bitCast(pml1[l_addr.pml1])) | flags | @as(usize, @bitCast(pml1[l_addr.pml1]))));
+                                                // pml1[l_addr.pml1].rw = 1;
+                                                // pml1[l_addr.pml1].present = 1;
                                                 i += 1;
                                                 p_addr = @bitCast(@as(usize, @bitCast(p_addr)) + 1 << 12);
                                             }
-                                            dbg.printf("address allocated: 0x{X}, paddr: 0x{X}\n", .{ raddr, paddr });
-                                            //dbg.printf("final address: {any}\n", .{@as(pf.virtual_address, @bitCast(raddr))});
                                             return raddr;
                                         }
                                     } else {
@@ -178,7 +180,6 @@ pub const VmmFreeList = extern struct {
         if (kspace == true) {
             t = .K_OCCUPIED;
         }
-        dbg.printf("reserving virtual address\n", .{});
         _ = self.insert_entry(VmmFreeListEntry{
             .vbase = vbase,
             .t = t,
@@ -218,16 +219,12 @@ pub const VmmFreeList = extern struct {
             }
             ctr += 1;
         }
-        //dbg.printf("original cwnode is {any}\n", .{cwnode});
-        dbg.printf("\nInserting with: {any}\n", .{e});
         if (cwnode.vbase == e.vbase and cwnode.len == e.len) { //|*********|
-            dbg.printf("c1\n", .{});
             cwnode.t = e.t;
             cwnode.pbase = e.pbase;
             return;
         }
         if (cwnode.vbase == e.vbase and cwnode.len > e.len) { // |****-----|
-            dbg.printf("c2\n", .{});
             const ins_e = self.alloc_entry() orelse return null;
             ins_e.* = e;
             cwnode.vbase += e.len;
@@ -239,7 +236,6 @@ pub const VmmFreeList = extern struct {
             return;
         }
         if (cwnode.vbase + cwnode.len == e.vbase + e.len) { // |-----****|
-            dbg.printf("c3\n", .{});
             const ins_e = self.alloc_entry() orelse return null;
             ins_e.* = e;
             ins_e.next = cwnode.next;
@@ -250,7 +246,6 @@ pub const VmmFreeList = extern struct {
         // |cwnode-ins_e2-ins_e1|
         // |--****--|
         if (cwnode.vbase < e.vbase and e.len < cwnode.len) {
-            dbg.printf("c4\n", .{});
             const ins_e1 = self.alloc_entry() orelse return null;
             const ins_e2 = self.alloc_entry() orelse return null;
             ins_e1.* = cwnode.*;
@@ -262,14 +257,9 @@ pub const VmmFreeList = extern struct {
             ins_e2.next = ins_e1;
             ins_e1.vbase = ins_e2.vbase + ins_e2.len;
             ins_e1.pbase = ins_e2.pbase + ins_e2.len;
-            // if (pnode) |p| {
-            //     dbg.printf("pnode: {any}\n", .{p});
-            // }
-            //dbg.printf("Cwnode: {any}\n\nins_e2: {any}\n\nins_e1: {any}\n", .{ cwnode, ins_e2, ins_e1 });
             return;
         } //                         fnode        e     cwnode
         if (e.len > cwnode.len) { //|----****|******|***---|
-            dbg.printf("c5\n", .{});
             var loopctr: usize = 0;
             const fnode: *VmmFreeListEntry = cwnode;
             while (cwnode.vbase + cwnode.len < e.vbase + e.len) {
@@ -285,11 +275,8 @@ pub const VmmFreeList = extern struct {
                 @panic("TODO VMM!");
             }
             cwnode.vbase = e.vbase + e.len;
-            // dbg.printf("\nfnode: {any}\n\ne1: {any}\n\ncwnode: {any}\n\n", .{ fnode, e1, cwnode });
-            // dbg.printf("ec5\n", .{});
             return;
         }
-        // dbg.printf("\ncwnode: {any}\n", .{cwnode});
         @panic("TODO VMM! ENTRY NOT HANDLED!");
     }
 };
@@ -330,5 +317,4 @@ pub fn setup(kphybase: usize, kphylen: usize) void {
     //     .mapped = false,
     //     .len = 0xFFFFFFFFFFFFFFFF - home_freelist.first.t[3].vbase ,
     // };
-    // dbg.printf("\nVMM SETUP DONE: vbase: 0x{X} len: 0x{X}\n", .{ home_freelist.first.t[3].vbase, home_freelist.first.t[3].len });
 }

@@ -38,6 +38,25 @@ pub const idtr_t = extern struct {
     limit: u16 align(1) = @import("std").mem.zeroes(u16),
     base: u64 align(1) = @import("std").mem.zeroes(u64),
 };
+var int_handle_t: [224]?*const fn (*int_regs) void = undefined;
+///Binds a specific vector
+pub fn bind_vector(te: *const fn (*int_regs) void, v: u16) ?void {
+    if (v > 255) return null;
+    if (int_handle_t[v - 32] != null) return null;
+    int_handle_t[v - 32] = te;
+}
+///Allocates an interrupt vector
+pub fn alloc_vector(te: *const fn (*int_regs) void) ?u16 {
+    var v: u16 = 0;
+    for (&int_handle_t) |*e| {
+        if (e.* == null) {
+            e.* = te;
+            return v + 32;
+        }
+        v += 1;
+    }
+    return null;
+}
 const exep_lookup_table = [_][]const u8{
     "Division fault",
     "Debug fault",
@@ -107,11 +126,14 @@ fn exep_handle(int: *int_regs) void {
         int.rsp,                       int.rflags,
         int.ss,                        int.cs,
     });
+    switch (int.int_no) {
+        0xe => {
+            const cr2 = dump_cr2();
+            tty.printf("address of page fault: 0x{x}", .{cr2});
+            dbg.printf("address of page fault: 0x{x}", .{cr2});
+        },
 
-    if (int.int_no == 0xe) {
-        const cr2 = dump_cr2();
-        tty.printf("address of page fault: 0x{x}", .{cr2});
-        dbg.printf("address of page fault: 0x{x}", .{cr2});
+        else => dbg.printf("No handler registred\n", .{}),
     }
     asm volatile ("cli; hlt");
 }
@@ -124,12 +146,24 @@ pub export fn handle_int(int: *int_regs) callconv(.C) void {
     if (int.int_no < 32) {
         exep_handle(int);
     }
+    if (int_handle_t[int.int_no - 32]) |handle| {
+        handle(int);
+    } else {
+        dbg.printf("unknown interrupt {}\n", .{int.int_no - 32});
+    }
     switch (int.int_no - 32) {
+        15 => { //NVMe
+            @import("../../../drivers/storage/NVMe/nvme.zig").NVMe.int_handler(int);
+        },
         else => dbg.printf("unknown interrupt {}\n", .{int.int_no - 32}),
     }
     pic.send_EOI(@truncate(int.int_no - 32));
 }
 extern fn idt_init() callconv(.C) void;
+fn null_stub(_: *int_regs) void {}
 pub fn init() void {
     idt_init();
+    for (32..32 + 16) |v| {
+        bind_vector(null_stub, @truncate(v)) orelse unreachable;
+    }
 }

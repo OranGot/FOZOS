@@ -32,12 +32,12 @@ fn insert_entry(e: list_entry) ?void {
 
     if (cwnode.base == e.base and cwnode.high == e.high and cwnode.type == e.type) return null;
     if (cwnode.base == e.base and cwnode.high == e.high) { // |*****|
-        dbg.printf("c1\n", .{});
+        // dbg.printf("c1\n", .{});
         cwnode.type = e.type;
         return;
     }
     if (cwnode.base == e.base and cwnode.high > e.high) { // |******---|
-        dbg.printf("c2\n", .{});
+        // dbg.printf("c2\n", .{});
         const e1 = allocate_list_entry() orelse return null;
         e1.* = e;
         e1.next = cwnode;
@@ -45,7 +45,7 @@ fn insert_entry(e: list_entry) ?void {
         return;
     }
     if (cwnode.high == e.high) { //|---*******|
-        dbg.printf("c3\n", .{});
+        // dbg.printf("c3\n", .{});
         const e1 = allocate_list_entry() orelse return null;
         e1.* = e;
         e1.next = cwnode.next;
@@ -54,7 +54,7 @@ fn insert_entry(e: list_entry) ?void {
     }
     //                                                          e1   e2
     if (cwnode.base < e.base and cwnode.high > e.high) { // |---*****---|
-        dbg.printf("c4\n", .{});
+        // dbg.printf("c4\n", .{});
         const e1 = allocate_list_entry() orelse return null;
         const e2 = allocate_list_entry() orelse return null;
         e1.* = e;
@@ -67,7 +67,7 @@ fn insert_entry(e: list_entry) ?void {
         return;
     }
     // in case such virtual address isn't yet mapped
-    dbg.printf("c5\n", .{});
+    // dbg.printf("c5\n", .{});
     const e1 = allocate_list_entry() orelse return null;
     e1.* = e;
     if (pnode) |p| {
@@ -129,7 +129,7 @@ pub inline fn setup() void {
     dbg.printf("setting up paging kernel length: 0x{x}\nframebuffer base: 0x{X}, framebuffer len: 0x{X}\n", .{ klen, fbase, flen });
     pageframe.setup_paging(kbase, klen);
     tty.map_framebuffer(fbase, flen);
-    dbg.printf("Mapped framebuffer\n", .{});
+    // dbg.printf("Mapped framebuffer\n", .{});
     dbg.printf("paging setup!\n", .{});
 }
 
@@ -211,9 +211,9 @@ inline fn allocate_list_entry() ?*list_entry {
             current_header = n;
         } else {
             const phy = request_pages(1) orelse return null;
-            const ne: *header_page = @ptrFromInt(vmm.home_freelist.alloc_vaddr(1, phy, true) orelse return null);
+            const ne: *header_page = @ptrFromInt(vmm.home_freelist.alloc_vaddr(1, phy, true, vmm.PRESENT | vmm.RW | vmm.XD) orelse return null);
             ne.next = null;
-            dbg.printf("allocating new block\n", .{});
+            // dbg.printf("allocating new block\n", .{});
             for (&ne.table) |*nte| {
                 nte.type = .UNDEFINED;
                 nte.next = null;

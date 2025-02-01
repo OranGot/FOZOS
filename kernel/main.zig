@@ -43,16 +43,16 @@ export fn _start() callconv(.C) noreturn {
     //tty.printf("IDT set up\n", .{});
     pic.PIC_remap(0x20, 0x20 + 8);
     //pic.IRQ_clear_mask(1);
-    pic.clear_mask();
+    //    pic.clear_mask();
     asm volatile ("sti");
 
     tty.printf("Interrupts setup\n", .{});
-    pci.init_devices();
-    const allocator = alloc.init();
+    alloc.init();
     dbg.printf("allocator initialised\n", .{});
-    const a: []u8 = allocator.alloc(u8, 10) catch {
+    const a: []u8 = alloc.gl_alloc.alloc(u8, 10) catch {
         @panic("allocator tests failed");
     };
+    pci.init_devices();
     dbg.printf("alloc test: {x}\n", .{@intFromPtr(a.ptr)});
     tty.printf("paging setup\n", .{});
     tty.printf(" _______  _______  _______  _______  _______ \n", .{});

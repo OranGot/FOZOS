@@ -29,7 +29,7 @@ pub const gp_allocator = struct {
                         if (d.bitmap[v] == 1) {
                             d.bitmap[v] = 0;
                         } else {
-                            dbg.printf("warning!!! double free\n", .{});
+                            // dbg.printf("warning!!! double free\n", .{});
                         }
                     }
                     return;
@@ -38,13 +38,13 @@ pub const gp_allocator = struct {
             if (working_superblock.next) |n| {
                 working_superblock = n;
             } else {
-                dbg.printf("WARNING: free failed\n", .{});
+                // dbg.printf("WARNING: free failed\n", .{});
                 return;
             }
         }
     }
     pub fn alloc(_: *anyopaque, len: usize, ptr_align: u8, _: usize) ?[*]u8 {
-        dbg.printf("alloc called len: {} align: {}\n", .{ len, ptr_align });
+        // dbg.printf("alloc called len: {} align: {}\n", .{ len, ptr_align });
         //const self: *gp_allocator = @alignCast(@ptrCast(selfo));
 
         var working_superblock: *allocator_superblock = &home_allocator_superblock;
@@ -57,15 +57,15 @@ pub const gp_allocator = struct {
                     }
                     d.dtype = .FREE;
                     const pbase = pageframe.request_pages(1) orelse return null;
-                    d.base = vmm.home_freelist.alloc_vaddr(1, pbase, true) orelse return null;
+                    d.base = vmm.home_freelist.alloc_vaddr(1, pbase, true, vmm.PRESENT | vmm.RW) orelse return null;
                 }
                 if (d.dtype == .FREE) {
                     var curfit: usize = 0;
-                    dbg.printf("found a fitting descriptor\n", .{});
+                    // dbg.printf("found a fitting descriptor\n", .{});
                     var i: usize = 0;
                     while (i < pageframe.PAGE_SIZE / 8) : (i += 1) { // NOTE: this is probably very inefficent as I use first fit
                         for (0..8) |bit| {
-                            dbg.printf("curfit: {}\n", .{curfit});
+                            // dbg.printf("curfit: {}\n", .{curfit});
                             if (get_bit_of_num(d.bitmap[i], @truncate(bit)) == true or curfit >= len) {
                                 if (curfit >= len and ptr_align == 0 or curfit >= len and mem.isAligned(d.base + i * 8 + bit, @as(usize, 1) << @truncate(ptr_align))) {
                                     return @ptrFromInt(d.base + i * 8 + bit - curfit);
@@ -78,10 +78,10 @@ pub const gp_allocator = struct {
             if (working_superblock.next) |next| {
                 working_superblock = next;
             } else {
-                dbg.printf("found a free descriptor\n", .{});
+                // dbg.printf("found a free descriptor\n", .{});
                 const phy = pageframe.request_pages(1) orelse return null;
-                dbg.printf("page request completed\n", .{});
-                const addr = vmm.home_freelist.alloc_vaddr(1, phy, true) orelse return null;
+                // dbg.printf("page request completed\n", .{});
+                const addr = vmm.home_freelist.alloc_vaddr(1, phy, true, vmm.RW | vmm.PRESENT) orelse return null;
                 const nb: *allocator_superblock = @ptrFromInt(addr);
                 nb.next = null;
 
@@ -151,8 +151,9 @@ pub const gp_allocator = struct {
         }
     }
 };
+pub var gl_alloc: mem.Allocator = undefined;
 pub var allocator: gp_allocator = undefined;
-pub fn init() mem.Allocator {
+pub fn init() void {
     home_allocator_superblock.next = null;
     for (&home_allocator_superblock.descriptors) |*d| {
         d.dtype = .UNDEFINED;
@@ -165,7 +166,7 @@ pub fn init() mem.Allocator {
         .alloc = &gp_allocator.alloc,
         .resize = &gp_allocator.resize,
     };
-    return mem.Allocator{
+    gl_alloc = mem.Allocator{
         .ptr = &allocator,
         .vtable = vtable,
     };
@@ -183,7 +184,7 @@ fn alloc_pd() ?*allocator_page_descriptor {
             if (d.dtype == .UNDEFINED) {
                 d.dtype = .FREE;
                 const phy = pageframe.request_pages(1) orelse return null;
-                d.base = vmm.home_freelist.alloc_vaddr(1, phy, true) orelse return null;
+                d.base = vmm.home_freelist.alloc_vaddr(1, phy, true | vmm.RW | vmm.PRESENT) orelse return null;
                 dbg.printf("alloc_pd completed", .{});
                 return d;
             }

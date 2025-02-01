@@ -52,14 +52,14 @@ run:
  -debugcon stdio -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -no-reboot -no-shutdown\
 
 run-nvme:
-	qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd -drive id=nvme0,file=FOZOS.img,if=none,format=raw -debugcon stdio -device nvme,serial=deadbeef,drive=nvme0 -m 2G -no-reboot -no-shutdown
+	qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd -drive id=nvme0,file=FOZOS.img,if=none,format=raw -debugcon stdio -device nvme,serial=deadbeef,drive=nvme0 -m 2G -no-reboot -no-shutdown -trace pci_nvme_read -trace pci_nvme_create_sq -trace pci_nvme_create_cq -trace nvme_submit_command  -trace pci_nvme_identify
 
 run-dbg:
-	qemu-system-x86_64   -drive id=disk,file=FOZOS.img,if=none,format=raw\
- -debugcon stdio -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -no-reboot -no-shutdown\
- -s -S -d int,mmu
+	qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd -drive id=nvme0,file=FOZOS.img,if=none,format=raw -debugcon stdio -device nvme,serial=deadbeef,drive=nvme0 -m 2G -no-reboot -no-shutdown -s -S
+
+
 dbg:
-	zig build -Doptimise=Debug
+	zig build -Doptimize=Debug
 	make hdd
 	make run-dbg
 img: 

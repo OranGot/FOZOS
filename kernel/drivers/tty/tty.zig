@@ -90,7 +90,7 @@ const palloc = @import("../../arch/x64/paging/pageframe_allocator.zig");
 const pageframe = @import("../../arch/x64/paging/pageframe.zig");
 pub fn map_framebuffer(fbstart: usize, fblen: usize) void {
     dbg.printf("fbstart: 0x{X}, fblen: 0x{X}\n", .{ fbstart, fblen });
-    const addr = vmm.home_freelist.alloc_vaddr(fblen / pageframe.PAGE_SIZE, fbstart, true) orelse @panic("TTY mapping failed\n");
+    const addr = vmm.home_freelist.alloc_vaddr(fblen / pageframe.PAGE_SIZE, fbstart, true, vmm.RW | vmm.PRESENT) orelse @panic("TTY mapping failed\n");
     dbg.printf("remapped to address: 0x{X}\n", .{addr});
     framebuffer.address = @ptrFromInt(addr);
     framebuffer.edid = null; //unused

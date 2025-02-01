@@ -44,24 +44,41 @@ pub fn config_read_word(bus: u8, dev: u8, func: u8, offset: u8) u16 {
         .reg_offset = offset,
     };
     pio.outl(0xCF8, @bitCast(config));
-    return @truncate((pio.inl(0xCFC) >> @truncate((offset & 2) * 8)) & 0xFFFF);
+    return @truncate((pio.inl(0xCFC) >> @truncate((offset % 2) * 8)));
+}
+//my project my rules
+pub fn config_read_dword(bus: u8, dev: u8, func: u8, offset: u8) u32 {
+    const config: config_address = .{
+        .bus_num = @truncate(bus),
+        .dev_num = @truncate(dev),
+        .func_num = @truncate(func),
+        .reg_offset = offset,
+    };
+    pio.outl(0xCF8, @bitCast(config));
+    return pio.inl(0xCFC);
 }
 const tty = @import("tty/tty.zig");
+const dbg = @import("dbg/dbg.zig");
 pub fn init_devices() void {
     for (0..255) |bus| {
         for (0..32) |dev| {
             const vendor_id = config_read_word(@truncate(bus), @truncate(dev), 0, PCI_VENDOR_ID);
             if (vendor_id == 0xFFFF) continue;
-            switch (config_read_word(@truncate(bus), @truncate(dev), 0, PCI_CLASS)) {
+            const class = (config_read_word(@truncate(bus), @truncate(dev), 0, PCI_SUBCLASS) & 0xFF00) >> 8;
+            const subclass = config_read_word(@truncate(bus), @truncate(dev), 0, PCI_SUBCLASS) & 0xFF;
+            dbg.printf("subclass: {}, class: {}\n", .{ subclass, class });
+            switch (class) {
                 0x1 => {
-                    switch (config_read_word(@truncate(bus), @truncate(dev), 0, PCI_SUBCLASS)) {
-                        0x7 => {
+                    switch (subclass) {
+                        0x8 => {
                             tty.printf("found an NVMe controller\n", .{});
+                            _ = @import("storage/NVMe/nvme.zig").init(@truncate(bus), @truncate(dev));
+                            @panic("testing");
                         },
-                        else => tty.printf("unknown subclass of mass storage pci device {},{}: 0x{x}", .{ bus, dev, config_read_word(@truncate(bus), @truncate(dev), 0, PCI_SUBCLASS) }),
+                        else => tty.printf("unknown subclass of mass storage pci device {},{}: 0x{x}", .{ bus, dev, subclass }),
                     }
                 },
-                else => tty.printf("unknown class on pci device: {},{}:0x{x}\n", .{ bus, dev, config_read_word(@truncate(bus), @truncate(dev), 0, PCI_CLASS) }),
+                else => tty.printf("unknown class on pci device: {},{}:0x{X}:0x{X}\n", .{ bus, dev, class, subclass }),
             }
         }
     }

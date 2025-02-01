@@ -5,20 +5,7 @@ const mmap_usable = 0;
 const vmm = @import("vmm.zig");
 pub const DEFAULT_STACK_SIZE = PAGE_SIZE * 12;
 export var limine_stack_request: limine.StackSizeRequest = .{ .stack_size = DEFAULT_STACK_SIZE }; //64 KiB of stack space
-pub const PML5_entry = packed struct(u64) {
-    present: u1,
-    rw: u1 = 1,
-    us: u1 = 0,
-    page_write_through: u1 = 0,
-    cache_disable: u1 = 0,
-    accessed: u1 = 0,
-    AVL0: u1 = 0,
-    r: u1 = 0,
-    AVL1: u4 = 0,
-    addr: u40 = 0,
-    AVL2: u11 = 0,
-    XD: u1 = 0,
-};
+
 pub const PML4_entry = packed struct(u64) {
     present: u1 = 0,
     rw: u1 = 0,
