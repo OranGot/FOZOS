@@ -77,7 +77,55 @@ const ControllerConfig = packed struct(u32) {
     controller_ready_independent_of_media_enable: bool,
     r2: u7,
 };
-const IDENTIFYResponse = extern struct {
+const ID_namespace_response = extern struct {
+    NSZE: u64,
+    NCAP: u64,
+    NUSE: u64,
+    NSFEAT: u8,
+    NLBAF: u8,
+    FLBAS: u8,
+    MC: u8,
+    DPC: u8,
+    DPS: u8,
+    NMIC: u8,
+    RESCAP: u8,
+    FPI: u8,
+    DLFEAT: u8,
+    NAWUN: u16,
+    NAWUPF: u16,
+    NACWU: u16,
+    NABSN: u16,
+    NABO: u16,
+    NABSPF: u16,
+    NOIOB: u16,
+    NVMCAP: u128,
+    NPWG: u16,
+    NPWA: u16,
+    NPDG: u16,
+    NPDA: u16,
+    NOWS: u16,
+    MSSRL: u16,
+    MCL: u32,
+    MSRC: u8,
+    KPIOS: u8,
+    NULBAF: u8,
+    r: u8,
+    KPIODAAG: u32,
+    r2: u32,
+    ANAGRPID: u32,
+    NSATTR: u8,
+    NVMSETID: u16,
+    ENDGID: u16,
+    NGUID: u128,
+    EUI64: u64,
+    LBA_FORMAT_SUPPORT: [64]packed struct(u32) {
+        MS: u16,
+        LBA_data_size: u8,
+        RP: u2,
+        r: u6,
+    },
+};
+const ID_controller_response = extern struct {
     pci_ven_id: u16,
     pci_subsys_ven: u16,
     serial_num: [20]u8,
@@ -229,6 +277,11 @@ const CmdError = error{
     TimeOut,
     Fail,
 };
+const HostBehaviourSupport = extern struct {
+    ACRE: u8,
+    ETDAS: u8,
+    LBAFEE: u8,
+};
 ///There will not be a lot of admin commands so I feel like we can get away with just handling one at a time
 var ADMIN_AWAITING_INTERRUPT: bool = false;
 pub const NVMe = struct {
@@ -246,7 +299,7 @@ pub const NVMe = struct {
     acq_head_doorbell: *volatile u32,
     doorbell_stride: usize,
     vector: u16,
-
+    lbas_per_block: u16 = 1,
     inline fn send_io_cmd(self: *NVMe, sqe: SubQEntry) CmdError!*ComplQEntry {
         self.cmd_id += 1;
         dbg.printf("cmd id: {}\n", .{self.cmd_id - 1});
@@ -295,18 +348,18 @@ pub const NVMe = struct {
         // dbg.printf("new doorbell: {x}\n", .{self.asq_tail_doorbell.*});
         if (self.asq_tail_doorbell.* == DEFAULT_ADMIN_QUEUE_SIZE) self.asq_tail_doorbell.* = 0;
         const completion: *volatile ComplQEntry = @ptrFromInt(t_acq_addr);
-        var timeout: usize = 0;
+        // var timeout: usize = 0;
         ADMIN_AWAITING_INTERRUPT = true;
         while (completion.phase_bit != true and ADMIN_AWAITING_INTERRUPT == true) {
-            if (timeout == RESET_TIMEOUT) {
-                dbg.printf("Admin command timed out! 0x{x}, 0x{x}, acq: {x}, asq: {x}\n", .{ self.acq_head_doorbell, self.asq_tail_doorbell, self.acq_head_doorbell.*, self.asq_tail_doorbell.* });
-                const csts: *ControllerStatus = @ptrFromInt(self.aquire_reg(0x1C) orelse return error.Fail);
-                dbg.printf("completion: {any}\ncsts: {any}\n", .{ completion, csts });
-                dbg.printf("submission: {any}\n", .{@as(*SubQEntry, @ptrFromInt(t_asq_addr))});
-                dbg.printf("Target asq address: 0x{x}, target acq address: 0x{x}\n", .{ t_asq_addr, t_acq_addr });
-                return error.TimeOut;
-            }
-            timeout += 1;
+            // if (timeout == RESET_TIMEOUT) {
+            //     dbg.printf("Admin command timed out! 0x{x}, 0x{x}, acq: {x}, asq: {x}\n", .{ self.acq_head_doorbell, self.asq_tail_doorbell, self.acq_head_doorbell.*, self.asq_tail_doorbell.* });
+            //     const csts: *ControllerStatus = @ptrFromInt(self.aquire_reg(0x1C) orelse return error.Fail);
+            //     dbg.printf("completion: {any}\ncsts: {any}\n", .{ completion, csts });
+            //     dbg.printf("submission: {any}\n", .{@as(*SubQEntry, @ptrFromInt(t_asq_addr))});
+            //     dbg.printf("Target asq address: 0x{x}, target acq address: 0x{x}\n", .{ t_asq_addr, t_acq_addr });
+            //     return error.TimeOut;
+            // }
+            // timeout += 1;
         }
         if (@as(u15, @bitCast(completion.stat_field)) != 0) {
             dbg.printf("completion: {any}", .{completion});
@@ -318,7 +371,7 @@ pub const NVMe = struct {
         dbg.printf("new completion doorbell: {}\n", .{self.acq_head_doorbell.*});
         return @volatileCast(completion);
     }
-    pub fn send_IDENTIFY_CONTROLLER(self: *NVMe) ?*IDENTIFYResponse {
+    pub fn send_IDENTIFY_CONTROLLER(self: *NVMe) ?*ID_controller_response {
         const DP = pf.request_pages(1) orelse return null;
         // const MP = pf.request_pages(1) orelse return null;
         _ = self.send_admin_cmd(SubQEntry{
@@ -416,7 +469,7 @@ pub const NVMe = struct {
         const dptr1: usize = paddr;
 
         var dptr2: usize = paddr + pf.PAGE_SIZE;
-        if (num_b == 1) {
+        if (num_b <= self.lbas_per_block) {
             dptr2 = 0;
         } else @panic("TODO, BUILD PRP LISTS");
         _ = self.send_io_cmd(SubQEntry{
@@ -436,6 +489,7 @@ pub const NVMe = struct {
     inline fn setup_admin_queues(self: *NVMe) ?void {
         const paddr = pf.request_pages(2) orelse return null;
         const vaddr = vmm.home_freelist.alloc_vaddr(2, paddr, true, vmm.RW | vmm.CACHE_DISABLE | vmm.PRESENT) orelse return null;
+
         self.admin_sq.paddr = paddr;
         self.admin_cq.paddr = paddr + pf.PAGE_SIZE;
         self.admin_sq.esize = @sizeOf(SubQEntry);
@@ -474,7 +528,50 @@ pub const NVMe = struct {
         ADMIN_AWAITING_INTERRUPT = false;
         dbg.printf("NVMe interrupt handler called\n", .{});
     }
-
+    inline fn format_lba(self: *NVMe) ?void {
+        const paddr = pf.request_pages(2) orelse return null;
+        const vaddr = vmm.home_freelist.alloc_vaddr(2, paddr, true, vmm.RW | vmm.PRESENT) orelse return null;
+        _ = self.send_admin_cmd(SubQEntry{
+            .cmd = .{
+                .opcode = 0x6,
+                .cmd_id = self.cmd_id,
+            },
+            .nsid = 1,
+            // .cmd_spec10 = 0x16,
+            .DatPtr1 = paddr,
+        }) catch |e| {
+            dbg.printf("error in identify: {}\n", .{e});
+            return null;
+        };
+        const r: *ID_namespace_response = @ptrFromInt(vaddr);
+        var i: u32 = 0;
+        for (r.LBA_FORMAT_SUPPORT) |j| {
+            dbg.printf("j: {any}\n", .{j});
+            if (r.NLBAF == i) return null;
+            if (j.LBA_data_size == 12) {
+                dbg.printf("cmd dword 10: 0b{b}", .{(i & 0xF) | ((i >> 4) << 12)});
+                dbg.printf("format: {any}\n", .{j});
+                _ = self.send_admin_cmd(SubQEntry{
+                    .DatPtr1 = 0,
+                    .nsid = 1,
+                    .cmd = .{
+                        .opcode = 0x80,
+                        .cmd_id = self.cmd_id,
+                    },
+                    .cmd_spec10 = (i & 0xF) | ((i >> 4) << 12),
+                }) catch |e| {
+                    dbg.printf("Format error: {}\n", .{e});
+                    return null;
+                };
+                return;
+            }
+            i += 1;
+        }
+        return null;
+    }
+    pub fn read_block(self: *NVMe, lba: u64, num_b: u16, kspace: bool) CmdError!*[pf.PAGE_SIZE]u8 {
+        return self.read(lba / self.lbas_per_block, num_b * self.lbas_per_block, kspace);
+    }
     inline fn reset_controller(self: *NVMe) ?void {
         // dbg.printf("Starting NVMe controller reset\n", .{});
         const cc: *ControllerConfig = @ptrFromInt(self.aquire_reg(0x14) orelse return null);
@@ -543,6 +640,8 @@ pub inline fn init(bus: u8, dev: u8) ?*NVMe {
     }
     const version: *Version = @ptrFromInt(lNVMe.aquire_reg(0x08) orelse return null);
     tty.printf("NVMe version: {}.{}.{}\n", .{ version.major, version.Minor, version.Tertiary });
+    // lNVMe.format_lba() orelse return null;
+
     lNVMe.register_int() orelse return null;
     // dbg.printf("registered interrupt vector: {}\n", .{lNVMe.vector});
     // dbg.printf("\nNVME IDENTIFY: {any}\n", .{lNVMe.send_IDENTIFY_CONTROLLER() orelse return null});
@@ -550,7 +649,28 @@ pub inline fn init(bus: u8, dev: u8) ?*NVMe {
         dbg.printf("error creating io queues: {}\n", .{e});
         return null;
     };
-    // dbg.printf("First block: {s}", .{lNVMe.read(0, 1, true) catch return null});
+    const idp = pf.request_pages(1) orelse return null;
+    _ = lNVMe.send_admin_cmd(SubQEntry{
+        .cmd = .{
+            .opcode = 0x6,
+            .cmd_id = lNVMe.cmd_id,
+        },
+        .nsid = 1,
+        // .cmd_spec10 = 0x16,
+        .DatPtr1 = idp,
+    }) catch |e| {
+        dbg.printf("error in identify: {}\n", .{e});
+        return null;
+    };
+    const vidp: *ID_namespace_response = @ptrFromInt(vmm.home_freelist.alloc_vaddr(1, idp, true, vmm.PRESENT) orelse return null);
+    if (vidp.LBA_FORMAT_SUPPORT[vidp.FLBAS & 0xF].LBA_data_size == 9) {
+        dbg.printf("set lbas per block\n", .{});
+        lNVMe.lbas_per_block = 8;
+    }
+
+    // dbg.printf("vidp: {any}\n", .{vidp});
+    dbg.printf("Formatting lba\n", .{});
+    dbg.printf("First lba: {s}\n", .{lNVMe.read_block(0, 1, true) catch return null});
     // dbg.printf("Second block: {s}", .{lNVMe.read(1, 1, true) catch return null});
     // dbg.printf("base: 0x{X}\n", .{lNVMe.base});
     tty.printf("NVMe initialisation finished\n", .{});

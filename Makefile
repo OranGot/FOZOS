@@ -34,7 +34,6 @@ clean:
 	-sudo losetup -d /dev/loop101 || true
 	-sudo losetup -d /dev/loop102 || true
 hdd:
-	#nasm kernel/arch/x64/interrupts/idt.s -o obj/idt.o -f elf64
 	clang -c -masm=intel kernel/arch/x64/interrupts/idt.S -o obj/idt.o
 	rm -f FOZOS.img
 	dd if=/dev/zero bs=1M count=0 seek=64 of=FOZOS.img
@@ -47,12 +46,8 @@ hdd:
 	mcopy -i FOZOS.img@@1M limine/limine-bios.sys ::/boot/limine
 	mcopy -i FOZOS.img@@1M limine/BOOTX64.EFI ::/EFI/BOOT
 	mcopy -i FOZOS.img@@1M limine/BOOTIA32.EFI ::/EFI/BOOT
-run:
-	qemu-system-x86_64   -drive id=disk,file=FOZOS.img,if=none,format=raw\
- -debugcon stdio -device ahci,id=ahci -device ide-hd,drive=disk,bus=ahci.0 -m 2G -no-reboot -no-shutdown\
-
 run-nvme:
-	qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd -drive id=nvme0,file=FOZOS.img,if=none,format=raw -debugcon stdio -device nvme,serial=deadbeef,drive=nvme0 -m 2G -no-reboot -no-shutdown -trace pci_nvme_read -trace pci_nvme_create_sq -trace pci_nvme_create_cq -trace nvme_submit_command  -trace pci_nvme_identify
+	qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd -drive id=nvme0,file=FOZOS.img,if=none,format=raw -debugcon stdio -device nvme,serial=deadbeef,drive=nvme0,physical_block_size=4096 -m 2G -no-reboot -no-shutdown -trace pci_nvme_read -trace pci_nvme_create_sq -trace pci_nvme_create_cq -trace nvme_submit_command  -trace pci_nvme_identify 
 
 run-dbg:
 	qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd -drive id=nvme0,file=FOZOS.img,if=none,format=raw -debugcon stdio -device nvme,serial=deadbeef,drive=nvme0 -m 2G -no-reboot -no-shutdown -s -S
