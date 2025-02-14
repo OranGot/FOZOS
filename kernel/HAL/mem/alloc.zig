@@ -1,7 +1,9 @@
-const mem = @import("std").mem;
-const dbg = @import("../../../drivers/dbg/dbg.zig");
-const pageframe = @import("pageframe_allocator.zig");
-const tty = @import("../../../drivers/tty/tty.zig");
+const std = @import("std");
+const target = std.Target.Cpu.Arch;
+const mem = std.mem;
+const dbg = @import("../../drivers/dbg/dbg.zig");
+const pageframe = @import("pmm.zig");
+const tty = @import("../../drivers/tty/tty.zig");
 const vmm = @import("vmm.zig");
 pub const gpa_error = error{
     OutOfMemory,
@@ -21,15 +23,16 @@ pub const gp_allocator = struct {
     first_superblock: *allocator_superblock = &home_allocator_superblock,
 
     pub fn free(_: *anyopaque, buf: []u8, _: u8, _: usize) void {
+        // dbg.printf("running free\n", .{});
         var working_superblock: *allocator_superblock = &home_allocator_superblock;
         while (true) {
             for (&working_superblock.descriptors) |*d| {
                 if (d.base >> 12 == @intFromPtr(buf.ptr) >> 12) {
-                    for (@intFromPtr(buf.ptr) % pageframe.PAGE_SIZE..@intFromPtr(buf.ptr) % pageframe.PAGE_SIZE + buf.len) |v| {
-                        if (d.bitmap[v] == 1) {
-                            d.bitmap[v] = 0;
+                    for (@intFromPtr(buf.ptr) % pageframe.BASE_PAGE_SIZE * 8..(@intFromPtr(buf.ptr) % pageframe.BASE_PAGE_SIZE) * 8 + buf.len * 8) |v| {
+                        if (get_bit_of_num(@intCast(d.bitmap[v / 8]), @truncate(v % 8)) == true) {
+                            set_bit_of_num(@alignCast(@ptrCast(&d.bitmap[v / 8])), @truncate(v % 8), false);
                         } else {
-                            // dbg.printf("warning!!! double free\n", .{});
+                            dbg.printf("warning!!! double free\n", .{});
                         }
                     }
                     return;
@@ -44,6 +47,7 @@ pub const gp_allocator = struct {
         }
     }
     pub fn alloc(_: *anyopaque, len: usize, ptr_align: u8, _: usize) ?[*]u8 {
+        // dbg.printf("alloc called\n", .{});
         // dbg.printf("alloc called len: {} align: {}\n", .{ len, ptr_align });
         //const self: *gp_allocator = @alignCast(@ptrCast(selfo));
 
@@ -63,13 +67,21 @@ pub const gp_allocator = struct {
                     var curfit: usize = 0;
                     // dbg.printf("found a fitting descriptor\n", .{});
                     var i: usize = 0;
-                    while (i < pageframe.PAGE_SIZE / 8) : (i += 1) { // NOTE: this is probably very inefficent as I use first fit
+                    while (i < pageframe.BASE_PAGE_SIZE / 8) : (i += 1) { // NOTE: this is probably very inefficent as I use first fit
                         for (0..8) |bit| {
                             // dbg.printf("curfit: {}\n", .{curfit});
                             if (get_bit_of_num(d.bitmap[i], @truncate(bit)) == true or curfit >= len) {
                                 if (curfit >= len and ptr_align == 0 or curfit >= len and mem.isAligned(d.base + i * 8 + bit, @as(usize, 1) << @truncate(ptr_align))) {
+                                    // dbg.printf("ALLOC INFO: reserving vaddr\n", .{});
+                                    for (i * 8 + bit - curfit..i * 8 + bit) |ii| {
+                                        // dbg.printf("ii: {}", .{ii});
+                                        // dbg.printf("{any}\n", .{d.bitmap});
+                                        set_bit_of_num(&d.bitmap[ii / 8], @truncate(ii % 8), true);
+                                    }
+                                    // dbg.printf("\nALLOC INFO allocated address: 0x{X}\n", .{d.base + i * 8 + bit - curfit});
+
                                     return @ptrFromInt(d.base + i * 8 + bit - curfit);
-                                } else dbg.printf("not properly aligned\n", .{});
+                                }
                             } else curfit += 1;
                         }
                     }
@@ -93,50 +105,16 @@ pub const gp_allocator = struct {
                     d.dtype = .UNDEFINED;
                     d.base = 0;
                 }
-                // dbg.printf("Ran out of free descriptors in superblocks \n", .{});
-                // var cwblock: *allocator_superblock = &home_allocator_superblock;
-                // w: while (true) {
-                //     for (&cwblock.descriptors) |*d| {
-                //         if (d.dtype == .UNDEFINED) {
-                //             dbg.printf("found a free descriptor\n", .{});
-                //             const phy = pageframe.request_pages(1) orelse return null;
-                //             dbg.printf("page request completed\n", .{});
-                //             const addr = vmm.home_freelist.alloc_vaddr(1, phy, true) orelse return null;
-                //             //const addr = pageframe.alloc_vaddr(@import("pageframe.zig").kernel_PML4_table, true, phy, 1) catch return null;
-                //
-                //             dbg.printf("virtual address request completed\n", .{});
-                //             d.base = @bitCast(addr);
-                //             d.dtype = .FREE;
-                //             break :w;
-                //         }
-                //     }
-                //
-                //     if (cwblock.next) |n| {
-                //         cwblock = n;
-                //     } else {
-                //         const paddr = pageframe.request_pages(1) orelse return null;
-                //         const vaddr = vmm.home_freelist.alloc_vaddr(1, paddr, true) orelse return null;
-                //         const nsuperblock: *allocator_superblock = @ptrFromInt(vaddr);
-                //         nsuperblock.next = null;
-                //         for (&nsuperblock.descriptors) |*d| {
-                //             d.dtype = .UNDEFINED;
-                //         }
-                //         cwblock.next = nsuperblock;
-                //         //need to allocate more superblocks
-                //         //@panic("TODO: need to allocate more superblocks.\n");
-                //     }
-                // }
-                // return null;
-                // TODO: allocate extra blocks
             }
         }
     }
     pub fn resize(_: *anyopaque, buf: []u8, _: u8, new_len: usize, _: usize) bool {
+        // dbg.printf("running resize\n", .{});
         var current_superblock: *allocator_superblock = &home_allocator_superblock;
         while (true) {
             for (&current_superblock.descriptors) |*d| {
                 if (d.base << 12 == @intFromPtr(buf.ptr) << 12) {
-                    for (@intFromPtr(buf.ptr) % pageframe.PAGE_SIZE + d.base + buf.len..@intFromPtr(buf.ptr) % pageframe.PAGE_SIZE + d.base + new_len) |s| {
+                    for (@intFromPtr(buf.ptr) % pageframe.BASE_PAGE_SIZE + d.base + buf.len..@intFromPtr(buf.ptr) % pageframe.BASE_PAGE_SIZE + d.base + new_len) |s| {
                         if (d.bitmap[s] == 0) {
                             d.bitmap[s] = 1;
                         } else return true;
@@ -171,11 +149,15 @@ pub fn init() void {
         .vtable = vtable,
     };
 }
-inline fn get_bit_of_num(num: usize, bit: u8) bool {
+inline fn get_bit_of_num(num: u8, bit: u8) bool {
     if ((num >> @truncate(bit)) & 1 == 1) return true else return false;
 }
-inline fn set_bit_of_num(num: *usize, bit: u8, state: bool) void {
-    num & ~(@intFromBool(!state) << @truncate(bit));
+inline fn set_bit_of_num(num: *u8, bit: u8, state: bool) void {
+    if (state == true) {
+        num.* |= @as(u8, @intCast(1)) << @truncate(bit);
+    } else {
+        num.* &= ~(@as(u8, @intCast(1)) << @truncate(bit));
+    }
 }
 fn alloc_pd() ?*allocator_page_descriptor {
     var cwsb = &home_allocator_superblock;
@@ -185,7 +167,7 @@ fn alloc_pd() ?*allocator_page_descriptor {
                 d.dtype = .FREE;
                 const phy = pageframe.request_pages(1) orelse return null;
                 d.base = vmm.home_freelist.alloc_vaddr(1, phy, true | vmm.RW | vmm.PRESENT) orelse return null;
-                dbg.printf("alloc_pd completed", .{});
+                // dbg.printf("alloc_pd completed", .{});
                 return d;
             }
         }

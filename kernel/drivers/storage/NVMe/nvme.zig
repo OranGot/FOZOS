@@ -1,3 +1,4 @@
+const std = @import("std");
 const CQeStatField = packed struct(u15) {
     stat_code: u8,
     stat_code_t: u3,
@@ -256,9 +257,9 @@ const AQA = packed struct(u32) {
 };
 const dbg = @import("../../dbg/dbg.zig");
 const pci = @import("../../pci.zig");
-const alloc = @import("../../../arch/x64/paging/gp_allocator.zig");
-const vmm = @import("../../../arch/x64/paging/vmm.zig");
-const pf = @import("../../../arch/x64/paging/pageframe_allocator.zig");
+const alloc = @import("../../../HAL/mem/alloc.zig");
+const vmm = @import("../../../HAL/mem/vmm.zig");
+const pf = @import("../../../HAL/mem/pmm.zig");
 const pio = @import("../../drvlib/drvcmn.zig");
 const pic = @import("../../pic/pic.zig");
 const QueueEntry = struct {
@@ -404,7 +405,7 @@ pub const NVMe = struct {
                 .opcode = 0x5,
                 .cmd_id = self.cmd_id,
             },
-            .DatPtr1 = paddr + pf.PAGE_SIZE,
+            .DatPtr1 = paddr + pf.BASE_PAGE_SIZE,
             .cmd_spec11 = (0 << 16) | 0b01,
             .cmd_spec10 = ((DEFAULT_ADMIN_QUEUE_SIZE - 1) << 16) | queue_id,
         }) catch |e| return e;
@@ -414,9 +415,9 @@ pub const NVMe = struct {
         self.io_sq.tail = 0;
         self.io_cq.tail = 0;
         self.io_sq.addr = vaddr;
-        self.io_cq.addr = vaddr + pf.PAGE_SIZE;
+        self.io_cq.addr = vaddr + pf.BASE_PAGE_SIZE;
         self.io_sq.paddr = paddr;
-        self.io_cq.paddr = paddr + pf.PAGE_SIZE;
+        self.io_cq.paddr = paddr + pf.BASE_PAGE_SIZE;
         self.io_sq.size = DEFAULT_ADMIN_QUEUE_SIZE;
         self.io_cq.size = DEFAULT_ADMIN_QUEUE_SIZE;
         self.io_sq.esize = @sizeOf(SubQEntry);
@@ -441,12 +442,14 @@ pub const NVMe = struct {
             return offset + self.vbase;
         }
     }
-    pub fn write(self: *NVMe, lba: u64, num_b: u16, kspace: bool) CmdError!*[pf.PAGE_SIZE]u8 {
-        const paddr = pf.request_pages(num_b) orelse return error.Fail;
-        const vaddr = vmm.home_freelist.alloc_vaddr(num_b, paddr, kspace, vmm.CACHE_DISABLE | vmm.PRESENT | vmm.RW) orelse return error.Fail;
+    pub fn write_block(self: *NVMe, lba: u64, num_b: u16, buf: [*]u8, vmm_ctx: *vmm.VmmFreeList) CmdError!void {
+        return self.write(lba * self.lbas_per_block, num_b * self.lbas_per_block, buf, vmm_ctx);
+    }
+    pub fn write(self: *NVMe, lba: u64, num_b: u16, buf: [*]u8, vmm_ctx: *vmm.VmmFreeList) CmdError!void {
+        const paddr = vmm_ctx.vaddr_to_paddr(@intFromPtr(buf)) orelse return error.Fail;
         const dptr1: usize = paddr;
 
-        var dptr2: usize = paddr + pf.PAGE_SIZE;
+        var dptr2: usize = paddr + pf.BASE_PAGE_SIZE;
         if (num_b == 1) {
             dptr2 = 0;
         } else @panic("TODO, BUILD PRP LISTS");
@@ -461,17 +464,28 @@ pub const NVMe = struct {
             .DatPtr1 = dptr1,
             .DatPtr2 = dptr2,
         }) catch |e| return e;
-        return @ptrFromInt(vaddr);
     }
-    pub fn read(self: *NVMe, lba: u64, num_b: u16, kspace: bool) CmdError!*[pf.PAGE_SIZE]u8 {
-        const paddr = pf.request_pages(num_b) orelse return error.Fail;
-        const vaddr = vmm.home_freelist.alloc_vaddr(num_b, paddr, kspace, vmm.RW | vmm.PRESENT | vmm.CACHE_DISABLE) orelse return error.Fail;
-        const dptr1: usize = paddr;
+    pub fn read(self: *NVMe, lba: u64, num_b: u16, buf: [*]u8, vmm_ctx: *vmm.VmmFreeList) CmdError!void {
+        if (num_b == 0) return;
+        const paddr = vmm_ctx.vaddr_to_paddr(@intFromPtr(buf)) orelse return error.Fail;
+        var dptr1: usize = paddr;
 
-        var dptr2: usize = paddr + pf.PAGE_SIZE;
+        var dptr2: usize = paddr + pf.BASE_PAGE_SIZE;
         if (num_b <= self.lbas_per_block) {
             dptr2 = 0;
-        } else @panic("TODO, BUILD PRP LISTS");
+        } else if (num_b <= self.lbas_per_block * 2) {} else if (num_b / self.lbas_per_block < 4096) {
+            const bp = pf.request_pages(1) orelse return error.Fail;
+            dptr1 = bp;
+            const vbp: *[pf.BASE_PAGE_SIZE / @sizeOf(usize)]usize = @ptrFromInt(vmm_ctx.alloc_vaddr(1, bp, true, vmm.PRESENT | vmm.RW) orelse return error.Fail);
+            for (0..num_b) |i| {
+                vbp[i] = paddr + i * pf.BASE_PAGE_SIZE;
+            }
+            dptr2 = 0;
+        } else {
+            dbg.printf("num blocks: {}, lba: {}\n", .{ num_b, lba });
+            @panic("TODO: build PRP list");
+        }
+        dbg.printf("dptr1: 0x{X} dptr2: 0x{X}\n", .{ dptr1, dptr2 });
         _ = self.send_io_cmd(SubQEntry{
             .cmd = .{
                 .opcode = 0x2,
@@ -483,7 +497,15 @@ pub const NVMe = struct {
             .DatPtr1 = dptr1,
             .DatPtr2 = dptr2,
         }) catch |e| return e;
-        return @ptrFromInt(vaddr);
+        if (num_b / self.lbas_per_block < 4096 and num_b / self.lbas_per_block > 2) {
+            dbg.printf("freeing\n", .{});
+            vmm_ctx.free_pages(vmm_ctx.paddr_to_vaddr(dptr1) orelse return error.Fail, 1);
+        }
+        // const r = [num_b / self.lbas_per_block * pf.BASE_PAGE_SIZE]u8;
+
+        // r.ptr = @ptrFromInt(vaddr);
+        // r.len = num_b / self.lbas_per_block * pf.BASE_PAGE_SIZE;
+        // dbg.printf("r: {any}", .{r});
     }
 
     inline fn setup_admin_queues(self: *NVMe) ?void {
@@ -491,18 +513,18 @@ pub const NVMe = struct {
         const vaddr = vmm.home_freelist.alloc_vaddr(2, paddr, true, vmm.RW | vmm.CACHE_DISABLE | vmm.PRESENT) orelse return null;
 
         self.admin_sq.paddr = paddr;
-        self.admin_cq.paddr = paddr + pf.PAGE_SIZE;
+        self.admin_cq.paddr = paddr + pf.BASE_PAGE_SIZE;
         self.admin_sq.esize = @sizeOf(SubQEntry);
         self.admin_sq.tail = 0;
         self.admin_cq.tail = 0;
         self.admin_sq.addr = vaddr;
-        self.admin_cq.addr = vaddr + pf.PAGE_SIZE;
+        self.admin_cq.addr = vaddr + pf.BASE_PAGE_SIZE;
         self.admin_sq.size = DEFAULT_ADMIN_QUEUE_SIZE - 1;
         self.admin_cq.size = DEFAULT_ADMIN_QUEUE_SIZE - 1;
         const sqreg: *usize = @ptrFromInt(self.aquire_reg(0x28) orelse return null);
         sqreg.* = paddr;
         const cqreg: *usize = @ptrFromInt(self.aquire_reg(0x30) orelse return null);
-        cqreg.* = paddr + pf.PAGE_SIZE;
+        cqreg.* = paddr + pf.BASE_PAGE_SIZE;
         const laqa: *AQA = @ptrFromInt(self.aquire_reg(0x24) orelse return null);
         laqa.admin_subq_size = DEFAULT_ADMIN_QUEUE_SIZE - 1;
         laqa.admin_complq_size = DEFAULT_ADMIN_QUEUE_SIZE - 1;
@@ -569,8 +591,8 @@ pub const NVMe = struct {
         }
         return null;
     }
-    pub fn read_block(self: *NVMe, lba: u64, num_b: u16, kspace: bool) CmdError!*[pf.PAGE_SIZE]u8 {
-        return self.read(lba / self.lbas_per_block, num_b * self.lbas_per_block, kspace);
+    pub fn read_block(self: *NVMe, lba: u64, num_b: u16, buf: [*]u8, vmm_ctx: *vmm.VmmFreeList) CmdError!void {
+        return self.read(lba * self.lbas_per_block, num_b * self.lbas_per_block, buf, vmm_ctx);
     }
     inline fn reset_controller(self: *NVMe) ?void {
         // dbg.printf("Starting NVMe controller reset\n", .{});
@@ -617,11 +639,23 @@ pub const NVMe = struct {
             timeout += 1;
         }
     }
+    pub fn rb_stub(self: *anyopaque, lba: u64, block_no: u16, buf: [*]u8, vmm_ctx: *vmm.VmmFreeList) anyerror!void {
+        return @as(*NVMe, @alignCast(@ptrCast(self))).read_block(lba, block_no, buf, vmm_ctx);
+    }
+    pub fn rmin_stub(self: *anyopaque, lba: u64, block_no: u16, buf: [*]u8, vmm_ctx: *vmm.VmmFreeList) anyerror!void {
+        return @as(*NVMe, @alignCast(@ptrCast(self))).read(lba, block_no, buf, vmm_ctx);
+    }
+    pub fn wb_stub(self: *anyopaque, lba: u64, block_no: u16, buf: [*]u8, vmm_ctx: *vmm.VmmFreeList) anyerror!void {
+        return @as(*NVMe, @alignCast(@ptrCast(self))).write_block(lba, block_no, buf, vmm_ctx);
+    }
+    pub fn wmin_stub(self: *anyopaque, lba: u64, block_no: u16, buf: [*]u8, vmm_ctx: *vmm.VmmFreeList) anyerror!void {
+        return @as(*NVMe, @alignCast(@ptrCast(self))).write(lba, block_no, buf, vmm_ctx);
+    }
 };
 
 const PREALLOCATED_PAGES = 2;
 const tty = @import("../../tty/tty.zig");
-pub inline fn init(bus: u8, dev: u8) ?*NVMe {
+pub inline fn init(bus: u8, dev: u8) ?void {
     dbg.printf("Initialising NVMe\n", .{});
     const lNVMe: *NVMe = alloc.gl_alloc.create(NVMe) catch return null;
     const bar0: u32 = pci.config_read_dword(bus, dev, 0, pci.PCI_BAR0);
@@ -650,6 +684,19 @@ pub inline fn init(bus: u8, dev: u8) ?*NVMe {
         return null;
     };
     const idp = pf.request_pages(1) orelse return null;
+    const idnslist = pf.request_pages(1) orelse return null;
+    _ = lNVMe.send_admin_cmd(SubQEntry{
+        .cmd = .{
+            .opcode = 0x6,
+            .cmd_id = lNVMe.cmd_id,
+        },
+        .nsid = 0,
+        .DatPtr1 = idnslist,
+        .cmd_spec10 = 2,
+    }) catch return null;
+    const vidnslist: *[1024]u32 = @ptrFromInt(vmm.home_freelist.alloc_vaddr(1, idnslist, true, vmm.PRESENT) orelse return null);
+    dbg.printf("namespace list: {any}\n", .{vidnslist});
+    vmm.home_freelist.free_pages(@intFromPtr(vidnslist), 1);
     _ = lNVMe.send_admin_cmd(SubQEntry{
         .cmd = .{
             .opcode = 0x6,
@@ -663,16 +710,32 @@ pub inline fn init(bus: u8, dev: u8) ?*NVMe {
         return null;
     };
     const vidp: *ID_namespace_response = @ptrFromInt(vmm.home_freelist.alloc_vaddr(1, idp, true, vmm.PRESENT) orelse return null);
-    if (vidp.LBA_FORMAT_SUPPORT[vidp.FLBAS & 0xF].LBA_data_size == 9) {
-        dbg.printf("set lbas per block\n", .{});
-        lNVMe.lbas_per_block = 8;
-    }
+    // if (vidp.LBA_FORMAT_SUPPORT[vidp.FLBAS & 0xF].LBA_data_size == 9) {
+    //     dbg.printf("set lbas per block\n", .{});
+    //     lNVMe.lbas_per_block = 8;
+    // }
+    dbg.printf("lba data size: {}\n", .{vidp.LBA_FORMAT_SUPPORT[vidp.FLBAS & 0xF].LBA_data_size});
+    lNVMe.lbas_per_block = 0x1000 / (@as(u16, @intCast(1)) << @truncate(vidp.LBA_FORMAT_SUPPORT[vidp.FLBAS & 0xF].LBA_data_size));
+    dbg.printf("lbas per block: {}\n", .{lNVMe.lbas_per_block});
+    const dtree = @import("../../../HAL/storage/dtree.zig");
+    var drv = std.ArrayList(dtree.DriveEntry).init(alloc.gl_alloc);
+    dbg.printf("drv initialised\n", .{});
+    drv.append(.{
+        .lba_size = 0x1000 / lNVMe.lbas_per_block,
+        .readb = NVMe.rb_stub,
+        .writeb = NVMe.wb_stub,
+        .readmin = NVMe.rmin_stub,
+        .writemin = NVMe.wmin_stub,
+    }) catch return null;
+    dbg.printf("drv appended: {any}, 0x{X}\n", .{ drv.items.ptr, @intFromPtr(dtree.gdtree.devices.items.ptr) });
+    dtree.gdtree.attach_device(.{
+        .drives = drv,
+        .deinit = null,
+        .self = @ptrCast(lNVMe),
+        .t = .NVMe,
+    }) orelse return null;
 
-    // dbg.printf("vidp: {any}\n", .{vidp});
-    dbg.printf("Formatting lba\n", .{});
-    dbg.printf("First lba: {s}\n", .{lNVMe.read_block(0, 1, true) catch return null});
-    // dbg.printf("Second block: {s}", .{lNVMe.read(1, 1, true) catch return null});
-    // dbg.printf("base: 0x{X}\n", .{lNVMe.base});
+    const p: [*]u8 = @ptrFromInt(vmm.home_freelist.alloc_pages(1, true, vmm.RW | vmm.PRESENT) orelse return null);
+    dtree.gdtree.read_min(0, 0, 0, 1, p, &vmm.home_freelist) catch return null;
     tty.printf("NVMe initialisation finished\n", .{});
-    return lNVMe;
 }

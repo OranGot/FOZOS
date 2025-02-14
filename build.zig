@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) void {
     //const root_source = b.path("kernel/main.zig");
     // Add Limine as a dependency.
     kernel.root_module.addImport("limine", limine.module("limine"));
-    kernel.setLinkerScriptPath(linker_script_path);
+    kernel.setLinkerScript(linker_script_path);
 
     b.installArtifact(kernel);
 }

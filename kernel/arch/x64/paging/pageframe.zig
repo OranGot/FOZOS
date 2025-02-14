@@ -2,8 +2,10 @@ const limine = @import("limine");
 const builtin = @import("builtin");
 const dbg = @import("../../../drivers/dbg/dbg.zig");
 const mmap_usable = 0;
+const hal = @import("../../../HAL/mem/pmm.zig");
+const hvmm = @import("../../../HAL/mem/vmm.zig");
 const vmm = @import("vmm.zig");
-pub const DEFAULT_STACK_SIZE = PAGE_SIZE * 12;
+pub const DEFAULT_STACK_SIZE = hal.BASE_PAGE_SIZE * 12;
 export var limine_stack_request: limine.StackSizeRequest = .{ .stack_size = DEFAULT_STACK_SIZE }; //64 KiB of stack space
 
 pub const PML4_entry = packed struct(u64) {
@@ -64,8 +66,6 @@ pub const PML1_entry = packed struct(u64) {
     PK: u4 = 0,
     XD: u1 = 0,
 };
-pub const PAGE_SIZE = 4096;
-var PAGING_LVLS = 5;
 extern fn flush_cr3(usize, rbp: usize, rsp: usize) callconv(.C) void;
 pub const virtual_address = packed struct(u64) {
     offset: u12,
@@ -130,10 +130,10 @@ fn remap_kernel(kphybase: u64) void {
             .addr = @truncate(phy >> 12),
             .rw = 1,
         };
-        vaddr += PAGE_SIZE;
-        phy += PAGE_SIZE;
+        vaddr += hal.BASE_PAGE_SIZE;
+        phy += hal.BASE_PAGE_SIZE;
         ctr += 1;
-        if (TARGET_VBASE + PAGE_SIZE * 512 == vaddr) @panic("kernel too big \n");
+        if (TARGET_VBASE + hal.BASE_PAGE_SIZE * 512 == vaddr) @panic("kernel too big \n");
     }
 }
 const tty = @import("../../../drivers/tty/tty.zig");
@@ -157,9 +157,9 @@ pub inline fn setup_paging(kphybase: u64, kphy_high: u64) void {
     };
     dbg.printf("pbase: 0x{X}\n", .{pbase});
     kernel_PML1_table = @ptrFromInt(pbase + HHDM_OFFSET);
-    kernel_PML2_table = @ptrFromInt(pbase + PAGE_SIZE + HHDM_OFFSET);
-    kernel_PML3_table = @ptrFromInt(pbase + PAGE_SIZE * 2 + HHDM_OFFSET);
-    kernel_PML4_table = @ptrFromInt(pbase + PAGE_SIZE * 3 + HHDM_OFFSET);
+    kernel_PML2_table = @ptrFromInt(pbase + hal.BASE_PAGE_SIZE + HHDM_OFFSET);
+    kernel_PML3_table = @ptrFromInt(pbase + hal.BASE_PAGE_SIZE * 2 + HHDM_OFFSET);
+    kernel_PML4_table = @ptrFromInt(pbase + hal.BASE_PAGE_SIZE * 3 + HHDM_OFFSET);
     //setting up page tables
     for (0..512) |i| {
         kernel_PML4_table[i] = PML4_entry{
@@ -180,35 +180,35 @@ pub inline fn setup_paging(kphybase: u64, kphy_high: u64) void {
         };
     }
     remap_kernel(kphybase);
-    dbg.printf("cr3 is going to be : 0x{x}. kernel PML4 table is located at 0x{x}\n", .{ pbase + PAGE_SIZE * 3, @intFromPtr(kernel_PML4_table) });
+    dbg.printf("cr3 is going to be : 0x{x}. kernel PML4 table is located at 0x{x}\n", .{ pbase + hal.BASE_PAGE_SIZE * 3, @intFromPtr(kernel_PML4_table) });
     //dump_stack_values();
     if (limine_stack_request.response == null) @panic("LIMINE STACK REQUEST FAIL. You probably don't have enough memory for it\n");
     const base = get_stack_base();
     const ptr = get_stack_ptr();
     //after this I can't modify the stack. this is not good but works. TODO: change that to maybe a single assebly block
-    const stack_base = map_stack(DEFAULT_STACK_SIZE / PAGE_SIZE, base);
+    const stack_base = map_stack(DEFAULT_STACK_SIZE / hal.BASE_PAGE_SIZE, base);
     const stack_ptr = stack_base - (base - ptr);
     KERNEL_VHIGH += DEFAULT_STACK_SIZE;
     map_ktables(pbase);
-    vmm.home_freelist.cr3 = pbase + PAGE_SIZE * 3;
-    flush(pbase + PAGE_SIZE * 3, stack_base, stack_ptr);
+    hvmm.home_freelist.cr3 = pbase + hal.BASE_PAGE_SIZE * 3;
+    flush(pbase + hal.BASE_PAGE_SIZE * 3, stack_base, stack_ptr);
     dbg.printf("cr3 flushed!\n", .{});
 }
 inline fn map_ktables(pbase: usize) void {
     dbg.printf("mapping ktables\n", .{});
-    vmm.home_freelist.reserve_vaddr(KERNEL_VHIGH, pbase, PAGE_SIZE * 4, true, true) orelse @panic("RESERVE VADDR FAILED\n");
-    _ = @call(.always_inline, vmm.VmmFreeList.reserve_vaddr, .{ &vmm.home_freelist, KERNEL_VHIGH, pbase, PAGE_SIZE * 4, true, true }) orelse @panic("RESERVE VADDR FAILED!\n");
+    hvmm.home_freelist.reserve_vaddr(KERNEL_VHIGH, pbase, hal.BASE_PAGE_SIZE * 4, true, true) orelse @panic("RESERVE VADDR FAILED\n");
+    _ = @call(.always_inline, hvmm.VmmFreeList.reserve_vaddr, .{ &hvmm.home_freelist, KERNEL_VHIGH, pbase, hal.BASE_PAGE_SIZE * 4, true, true }) orelse @panic("RESERVE VADDR FAILED!\n");
     const exp_khigh: virtual_address = @bitCast(KERNEL_VHIGH);
     for (0..4) |e| {
         kernel_PML1_table[exp_khigh.pml1 + e].present = 1;
         kernel_PML1_table[exp_khigh.pml1 + e].rw = 1;
-        kernel_PML1_table[exp_khigh.pml1 + e].addr = @truncate((pbase + e * PAGE_SIZE) >> 12);
+        kernel_PML1_table[exp_khigh.pml1 + e].addr = @truncate((pbase + e * hal.BASE_PAGE_SIZE) >> 12);
     }
     kernel_PML1_table = @ptrFromInt(KERNEL_VHIGH);
-    kernel_PML2_table = @ptrFromInt(KERNEL_VHIGH + PAGE_SIZE * 2);
-    kernel_PML3_table = @ptrFromInt(KERNEL_VHIGH + PAGE_SIZE * 3);
-    kernel_PML4_table = @ptrFromInt(KERNEL_VHIGH + PAGE_SIZE * 4);
-    KERNEL_VHIGH += PAGE_SIZE * 4;
+    kernel_PML2_table = @ptrFromInt(KERNEL_VHIGH + hal.BASE_PAGE_SIZE * 2);
+    kernel_PML3_table = @ptrFromInt(KERNEL_VHIGH + hal.BASE_PAGE_SIZE * 3);
+    kernel_PML4_table = @ptrFromInt(KERNEL_VHIGH + hal.BASE_PAGE_SIZE * 4);
+    KERNEL_VHIGH += hal.BASE_PAGE_SIZE * 4;
 }
 
 inline fn flush(cr3: usize, rbp: usize, rsp: usize) void {
@@ -227,8 +227,8 @@ fn map_stack(pno: usize, base: usize) usize {
     dump_stack_values();
     const phybase = base - HHDM_OFFSET; //since stack is in the bootloader reclaimable area we can subtract the hhdm offset
     const expanded_vhigh: virtual_address = @bitCast(KERNEL_VHIGH);
-    palloc.reserve_address(phybase - pno * PAGE_SIZE, pno, .NO_FREE_RESERVED) orelse @panic("Can't reserve stack's address. this really shouldn't happen\n");
-    var stack_page = phybase - pno * PAGE_SIZE;
+    palloc.reserve_address(phybase - pno * hal.BASE_PAGE_SIZE, pno, .NO_FREE_RESERVED) orelse @panic("Can't reserve stack's address. this really shouldn't happen\n");
+    var stack_page = phybase - pno * hal.BASE_PAGE_SIZE;
     for (expanded_vhigh.pml1..expanded_vhigh.pml1 + pno) |i| {
         if (i == 255) @panic("kernel too big, can't allocate stack");
         kernel_PML1_table[i] = PML1_entry{
@@ -238,9 +238,9 @@ fn map_stack(pno: usize, base: usize) usize {
         };
         //dbg.printf("pml1 entry: {any}\n", .{kernel_PML1_table[i]});
         //dbg.printf("stack page = 0x{x}\n", .{stack_page});
-        stack_page += PAGE_SIZE;
+        stack_page += hal.BASE_PAGE_SIZE;
     }
-    return KERNEL_VHIGH + pno * PAGE_SIZE;
+    return KERNEL_VHIGH + pno * hal.BASE_PAGE_SIZE;
 }
 const palloc = @import("pageframe_allocator.zig");
 pub inline fn get_stack_base() usize {

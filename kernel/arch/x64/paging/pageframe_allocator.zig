@@ -1,7 +1,8 @@
 const limine = @import("limine");
 const pageframe = @import("pageframe.zig");
 const dbg = @import("../../../drivers/dbg/dbg.zig");
-const vmm = @import("vmm.zig");
+const vmm = @import("../../../HAL/mem/vmm.zig");
+const direct_vmm = @import("vmm.zig");
 pub const list_entry_type = enum(u8) {
     FREE = 0,
     RESERVED = 1,
@@ -29,7 +30,6 @@ fn insert_entry(e: list_entry) ?void {
             cwnode = n;
         } else break;
     }
-
     if (cwnode.base == e.base and cwnode.high == e.high and cwnode.type == e.type) return null;
     if (cwnode.base == e.base and cwnode.high == e.high) { // |*****|
         // dbg.printf("c1\n", .{});
@@ -125,7 +125,7 @@ pub inline fn setup() void {
         home_pageframe_page.table[a].type = .UNDEFINED;
         home_pageframe_page.table[a].next = null;
     }
-    vmm.setup(kbase, klen);
+    direct_vmm.setup(kbase, klen);
     dbg.printf("setting up paging kernel length: 0x{x}\nframebuffer base: 0x{X}, framebuffer len: 0x{X}\n", .{ klen, fbase, flen });
     pageframe.setup_paging(kbase, klen);
     tty.map_framebuffer(fbase, flen);
@@ -152,6 +152,7 @@ pub fn request_pages(pageno: u64) ?usize {
         if (cwnode.next) |n| cwnode = n else return null;
     }
     const base = cwnode.base;
+    dbg.printf("inserting at: 0x{X}\n", .{cwnode.base});
     insert_entry(.{
         .base = cwnode.base,
         .high = cwnode.base + PAGE_SIZE * pageno,
@@ -161,42 +162,43 @@ pub fn request_pages(pageno: u64) ?usize {
     return base;
 }
 
-const FreeError = error{
-    PermissionDenied,
-    DoubleFree,
-    NoFittingPage,
-};
-
-pub fn free_pages(pageno: u64, base: u64) FreeError!void {
-    var cw_list_entry: *list_entry = home_pageframe_page.table[0];
-    var prev_entry: *list_entry = undefined;
-
-    while (true) {
-        if (cw_list_entry.base >> 12 == base >> 12) {
-            if (cw_list_entry.type != .OCCUPIED) return error.DoubleFree;
-            if (base == cw_list_entry.base and base + pageno * PAGE_SIZE == cw_list_entry.high) {
-                cw_list_entry.type = .FREE;
-                concat_nodes(cw_list_entry, prev_entry);
-                return;
-            } else if (base == cw_list_entry.base) {
-                const entry = allocate_list_entry().?;
-                entry.base = base + PAGE_SIZE * pageno;
-                entry.type = .OCCUPIED;
-                entry.high = cw_list_entry.high;
-                cw_list_entry.high = base + PAGE_SIZE * pageno;
-                entry.next = if (cw_list_entry.next) |e| b: {
-                    break :b e;
-                } else c: {
-                    break :c null;
-                };
-                cw_list_entry.next = entry;
-            }
-        }
-        if (cw_list_entry.next) |e| {
-            prev_entry = cw_list_entry;
-            cw_list_entry = e;
-        } else return error.NoFittingPage;
-    }
+const hal = @import("../../../HAL/mem/pmm.zig");
+pub fn free_pages(pageno: u64, base: u64) ?void {
+    // var cw_list_entry: *list_entry = &home_pageframe_page.table[0];
+    // var prev_entry: *list_entry = undefined;
+    dbg.printf("freeing phy address: 0x{X}\n", .{base});
+    insert_entry(.{
+        .base = base,
+        .high = base + pageno * hal.BASE_PAGE_SIZE,
+        .type = .FREE,
+        .next = null,
+    }) orelse return null;
+    // while (true) {
+    //     if (cw_list_entry.base >> 12 == base >> 12) {
+    //         if (cw_list_entry.type != .OCCUPIED) return error.DoubleFree;
+    //         if (base == cw_list_entry.base and base + pageno * PAGE_SIZE == cw_list_entry.high) {
+    //             cw_list_entry.type = .FREE;
+    //             concat_nodes(cw_list_entry, prev_entry);
+    //             return;
+    //         } else if (base == cw_list_entry.base) {
+    //             const entry = allocate_list_entry().?;
+    //             entry.base = base + PAGE_SIZE * pageno;
+    //             entry.type = .OCCUPIED;
+    //             entry.high = cw_list_entry.high;
+    //             cw_list_entry.high = base + PAGE_SIZE * pageno;
+    //             entry.next = if (cw_list_entry.next) |e| b: {
+    //                 break :b e;
+    //             } else c: {
+    //                 break :c null;
+    //             };
+    //             cw_list_entry.next = entry;
+    //         }
+    //     }
+    //     if (cw_list_entry.next) |e| {
+    //         prev_entry = cw_list_entry;
+    //         cw_list_entry = e;
+    //     } else return error.NoFittingPage;
+    // }
 }
 inline fn allocate_list_entry() ?*list_entry {
     var current_header: *header_page = &home_pageframe_page;
