@@ -152,7 +152,7 @@ pub fn request_pages(pageno: u64) ?usize {
         if (cwnode.next) |n| cwnode = n else return null;
     }
     const base = cwnode.base;
-    dbg.printf("inserting at: 0x{X}\n", .{cwnode.base});
+    // dbg.printf("inserting at: 0x{X}\n", .{cwnode.base});
     insert_entry(.{
         .base = cwnode.base,
         .high = cwnode.base + PAGE_SIZE * pageno,
@@ -166,7 +166,7 @@ const hal = @import("../../../HAL/mem/pmm.zig");
 pub fn free_pages(pageno: u64, base: u64) ?void {
     // var cw_list_entry: *list_entry = &home_pageframe_page.table[0];
     // var prev_entry: *list_entry = undefined;
-    dbg.printf("freeing phy address: 0x{X}\n", .{base});
+    // dbg.printf("freeing phy address: 0x{X}\n", .{base});
     insert_entry(.{
         .base = base,
         .high = base + pageno * hal.BASE_PAGE_SIZE,

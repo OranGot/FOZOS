@@ -24,8 +24,8 @@ hdd:
 	mcopy -i FOZOS.img@@1M limine/BOOTX64.EFI ::/EFI/BOOT
 	mcopy -i FOZOS.img@@1M limine/BOOTIA32.EFI ::/EFI/BOOT
 	losetup /dev/loop101 FOZOS.img
-	losetup /dev/loop102 FOZOS.img -o 4194304
-	mkfs.ext2 /dev/loop102 -L "FOZOS_EXT2" -b 4096 
+	losetup /dev/loop102 FOZOS.img -o 5242880
+	mkfs.ext2 /dev/loop102 -L "FOZOS_EXT2" -b 4096 -I 128 
 	mount /dev/loop102 /mnt/fozos
 	cp -r indisk/* /mnt/fozos 
 	umount /mnt/fozos
@@ -43,6 +43,6 @@ dbg:
 	make hdd
 	make run-dbg
 img: 
-	zig build -freference-trace
+	zig build -freference-trace 
 	make hdd 
 	make run-nvme

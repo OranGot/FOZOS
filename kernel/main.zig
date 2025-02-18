@@ -75,20 +75,10 @@ export fn _start() callconv(.C) noreturn {
     dbg.printf("FOZOS init done\n", .{});
     done();
 }
-pub fn panic(message: []const u8, trace: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
+pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
+    // asm volatile ("cli");
     dbg.printf("FOZOS PANIC: {s}\n", .{message});
     tty.printf("FOZOS PANIC: {s}\n", .{message});
-    if (addr) |a| {
-        tty.printf("at 0x{x}\n", .{a});
-    } else {
-        tty.printf("no address\n", .{});
-    }
-    if (trace) |tr| {
-        for (0..tr.index) |i| {
-            tty.printf("i: {}. Instruction at: {x}\n", .{ i, tr.instruction_addresses[i] });
-        }
-    } else {
-        tty.printf("no trace\n", .{});
-    }
+
     done();
 }

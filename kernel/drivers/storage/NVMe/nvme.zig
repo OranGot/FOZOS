@@ -309,19 +309,19 @@ pub const NVMe = struct {
         @as(*volatile SubQEntry, @ptrFromInt(t_isq_addr)).* = sqe;
         if (self.isq_tail_doorbell.* == DEFAULT_ADMIN_QUEUE_SIZE) self.isq_tail_doorbell.* = 0;
         const completion: *volatile ComplQEntry = @ptrFromInt(t_icq_addr);
-        var timeout: usize = 0;
+        // var timeout: usize = 0;
         ADMIN_AWAITING_INTERRUPT = true;
         self.io_sq.tail += 1;
         self.isq_tail_doorbell.* = self.io_sq.tail;
         while (completion.phase_bit != true and ADMIN_AWAITING_INTERRUPT == true) {
-            if (timeout == RESET_TIMEOUT) {
-                dbg.printf("IO command timed out! 0x{x}, 0x{x}, icq: {x}, isq: {x}\n", .{ self.icq_head_doorbell, self.isq_tail_doorbell, self.icq_head_doorbell.*, self.isq_tail_doorbell.* });
-                dbg.printf("completion: {any}\n", .{completion});
-                dbg.printf("submission: {any}\n", .{@as(*SubQEntry, @ptrFromInt(t_isq_addr))});
-                dbg.printf("Target isq address: 0x{x}, target icq address: 0x{x}\n", .{ t_isq_addr, t_icq_addr });
-                return error.TimeOut;
-            }
-            timeout += 1;
+            // if (timeout == RESET_TIMEOUT) {
+            //     dbg.printf("IO command timed out! 0x{x}, 0x{x}, icq: {x}, isq: {x}\n", .{ self.icq_head_doorbell, self.isq_tail_doorbell, self.icq_head_doorbell.*, self.isq_tail_doorbell.* });
+            //     dbg.printf("completion: {any}\n", .{completion});
+            //     dbg.printf("submission: {any}\n", .{@as(*SubQEntry, @ptrFromInt(t_isq_addr))});
+            //     dbg.printf("Target isq address: 0x{x}, target icq address: 0x{x}\n", .{ t_isq_addr, t_icq_addr });
+            //     return error.TimeOut;
+            // }
+            // timeout += 1;
         }
         self.io_cq.tail += 1;
         self.icq_head_doorbell.* += 1;
@@ -368,8 +368,8 @@ pub const NVMe = struct {
         }
         self.acq_head_doorbell.* += 1;
         self.admin_cq.tail += 1;
-        dbg.printf("Completion: {any}", .{completion});
-        dbg.printf("new completion doorbell: {}\n", .{self.acq_head_doorbell.*});
+        // dbg.printf("Completion: {any}", .{completion});
+        // dbg.printf("new completion doorbell: {}\n", .{self.acq_head_doorbell.*});
         return @volatileCast(completion);
     }
     pub fn send_IDENTIFY_CONTROLLER(self: *NVMe) ?*ID_controller_response {
@@ -498,7 +498,7 @@ pub const NVMe = struct {
             .DatPtr2 = dptr2,
         }) catch |e| return e;
         if (num_b / self.lbas_per_block < 4096 and num_b / self.lbas_per_block > 2) {
-            dbg.printf("freeing\n", .{});
+            // dbg.printf("freeing\n", .{});
             vmm_ctx.free_pages(vmm_ctx.paddr_to_vaddr(dptr1) orelse return error.Fail, 1);
         }
         // const r = [num_b / self.lbas_per_block * pf.BASE_PAGE_SIZE]u8;
@@ -592,6 +592,7 @@ pub const NVMe = struct {
         return null;
     }
     pub fn read_block(self: *NVMe, lba: u64, num_b: u16, buf: [*]u8, vmm_ctx: *vmm.VmmFreeList) CmdError!void {
+        dbg.printf("lba: 0x{X}, num_b: {}, lbas per block: {}\n", .{ lba * self.lbas_per_block, num_b * self.lbas_per_block, self.lbas_per_block });
         return self.read(lba * self.lbas_per_block, num_b * self.lbas_per_block, buf, vmm_ctx);
     }
     inline fn reset_controller(self: *NVMe) ?void {
