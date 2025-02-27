@@ -1,18 +1,17 @@
-all: img
+.PHONY: all clean hdd run run-dbg kernel kernel-dbg limine
+
+all: kernel
+
 clean:
 	rm -rf disk/boot/limine/*
 	rm -rf disk/boot/kernel
 	rm -rf disk/EFI/BOOT/*
+	rm -f FOZOS.img
 	-sudo umount /mnt || true
 	-sudo losetup -d /dev/loop101 || true
 	-sudo losetup -d /dev/loop102 || true
-hdd:
-	-losetup -d /dev/loop101 || true
-	-losetup -d /dev/loop102 || true
 
-	-umount /mnt/fozos || true
-	clang -c -masm=intel kernel/arch/x64/interrupts/idt.S -o obj/idt.o
-	rm -f FOZOS.img
+hdd: clean zig-out/bin/kernel limine
 	dd if=/dev/zero bs=1M count=0 seek=64 of=FOZOS.img
 	sgdisk FOZOS.img -n 1:2048:8192 -t 1:ef00 -N 2 -c 1:"UEFI" -c 2:"Fext2" 
 	./limine/limine bios-install FOZOS.img
@@ -32,17 +31,20 @@ hdd:
 	-losetup -d /dev/loop101 || true
 	-losetup -d /dev/loop102 || true
 
-run-nvme:
+run: kernel hdd
 	qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd -drive id=nvme0,file=FOZOS.img,if=none,format=raw -debugcon stdio -device nvme,serial=deadbeef,drive=nvme0 -m 2G -no-reboot -no-shutdown -trace pci_nvme_read
-run-dbg:
+run-dbg: kernel-dbg hdd
 	qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd -drive id=nvme0,file=FOZOS.img,if=none,format=raw -debugcon stdio -device nvme,serial=deadbeef,drive=nvme0 -m 2G -no-reboot -no-shutdown -s -S
 
-
-dbg:
-	zig build -Doptimize=Debug
-	make hdd
-	make run-dbg
-img: 
+kernel: zig-out/bin/kernel limine
+	rm -rf obj
+	zig cc -c -masm=intel kernel/arch/x64/interrupts/idt.S -o obj/idt.o
 	zig build -freference-trace
-	make hdd 
-	make run-nvme
+
+kernel-dbg: zig-out/bin/kernel limine
+	rm -rf obj
+	zig cc -c -masm=intel kernel/arch/x64/interrupts/idt.S -o obj/idt.o
+	zig build -Doptimize=Debug
+
+limine:
+	cd limine && git checkout v9.x-binary && git pull origin v9.x-binary && make
