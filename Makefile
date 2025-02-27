@@ -7,6 +7,8 @@ clean:
 	rm -rf disk/boot/kernel
 	rm -rf disk/EFI/BOOT/*
 	rm -f FOZOS.img
+	rm -rf obj
+	-rm -rf /mnt/fozos
 	-sudo umount /mnt || true
 	-sudo losetup -d /dev/loop101 || true
 	-sudo losetup -d /dev/loop102 || true
@@ -25,6 +27,7 @@ hdd: clean zig-out/bin/kernel limine
 	losetup /dev/loop101 FOZOS.img
 	losetup /dev/loop102 FOZOS.img -o 4194304
 	mkfs.ext2 /dev/loop102 -L "FOZOS_EXT2" -b 4096 
+	mkdir -p /mnt/fozos
 	mount /dev/loop102 /mnt/fozos
 	cp -r indisk/* /mnt/fozos 
 	umount /mnt/fozos
@@ -36,13 +39,13 @@ run: kernel hdd
 run-dbg: kernel-dbg hdd
 	qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd -drive id=nvme0,file=FOZOS.img,if=none,format=raw -debugcon stdio -device nvme,serial=deadbeef,drive=nvme0 -m 2G -no-reboot -no-shutdown -s -S
 
-kernel: zig-out/bin/kernel limine
-	rm -rf obj
+kernel: limine
+	mkdir -p obj
 	zig cc -c -masm=intel kernel/arch/x64/interrupts/idt.S -o obj/idt.o
 	zig build -freference-trace
 
-kernel-dbg: zig-out/bin/kernel limine
-	rm -rf obj
+kernel-dbg: limine
+	mkdir -p obj
 	zig cc -c -masm=intel kernel/arch/x64/interrupts/idt.S -o obj/idt.o
 	zig build -Doptimize=Debug
 

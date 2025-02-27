@@ -49,4 +49,4 @@ To run the debug version, use:
 sudo make run-dbg
 ```
 ### Note
-Creating the image uses Loop Devices, which require `sudo` permissions.
+Creating the image uses Loop Devices, which require `sudo` permissions. and also `clean` step for delting mount point ect
