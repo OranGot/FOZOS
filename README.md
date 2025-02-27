@@ -25,7 +25,7 @@ To build FOZOS, ensure you have the following dependencies installed:
 - `git`
 - `sgdisk`
 ### Cloning the Repository
-Clone the repository recursively to include the Limine submodule:
+Clone the repository recursively to include the Limine submodule(can be slow, can be faster by adding --depth 1):
 ```bash
 git clone --recursive https://github.com/OranGot/FOZOS.git
 ```
