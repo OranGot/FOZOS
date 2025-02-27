@@ -3,3 +3,4 @@
     url = https://github.com/limine-bootloader/limine.git
     branch = v9.x-binary
 	shallow = true
+    depth = 1

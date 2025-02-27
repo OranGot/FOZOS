@@ -50,4 +50,4 @@ kernel-dbg: limine
 	zig build -Doptimize=Debug
 
 limine:
-	cd limine && git checkout v9.x-binary && git pull origin v9.x-binary && make
+	cd limine && make

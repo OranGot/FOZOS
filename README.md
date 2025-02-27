@@ -27,7 +27,7 @@ To build FOZOS, ensure you have the following dependencies installed:
 ### Cloning the Repository
 Clone the repository recursively to include the Limine submodule:
 ```bash
-git clone --recurse-submodules --shallow-submodules https://github.com/OranGot/FOZOS.git
+git clone --recursive https://github.com/OranGot/FOZOS.git
 ```
 ### Building the Kernel
 To build the kernel, run:
