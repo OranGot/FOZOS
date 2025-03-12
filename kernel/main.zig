@@ -7,9 +7,10 @@ const idt = @import("arch/x64/interrupts/handle.zig");
 const pic = @import("drivers/pic/pic.zig");
 const pageframe = @import("arch/x64/paging/pageframe_allocator.zig");
 const gpt = @import("drivers/storage/gpt.zig");
+const sched = @import("proc/sched.zig");
 pub export var framebuffer_request: limine.FramebufferRequest = .{};
 pub export var base_revision: limine.BaseRevision = .{ .revision = 2 };
-inline fn done() noreturn {
+pub export fn done() noreturn {
     while (true) {
         asm volatile ("hlt");
     }
@@ -39,6 +40,7 @@ export fn _start() callconv(.C) noreturn {
 
             tty.printf("pageframe setup\n", .{});
             @import("arch/x64/gdt/gdt.zig").setup_gdt();
+            tty.printf("paging setup\n", .{});
         },
         else => std.debug.panic("unsupported arch!!!\n", .{}),
     }
@@ -56,13 +58,17 @@ export fn _start() callconv(.C) noreturn {
     const a: []u8 = alloc.gl_alloc.alloc(u8, 10) catch {
         @panic("allocator tests failed");
     };
+    dbg.printf("alloc test: {x}\n", .{@intFromPtr(a.ptr)});
     alloc.gl_alloc.free(a);
     @import("HAL/storage/dtree.zig").init();
     pci.init_devices();
     gpt.load_partitions() orelse @panic("PARTITION TABLE DAMAGED");
-    // _ = @import("drivers/storage/fs/ext2/main.zig").Ext2.read_superlock() orelse @panic("e");
-    dbg.printf("alloc test: {x}\n", .{@intFromPtr(a.ptr)});
-    tty.printf("paging setup\n", .{});
+    tty.printf("GPT Partitions loaded\n", .{});
+    dbg.printf("GPT Partitions loaded\n", .{});
+    @import("arch/x64/syscall/init.zig").init();
+    dbg.printf("syscalls initialised\n", .{});
+    @import("proc/sched.zig").gl_sched.init() catch @panic("Scheduler init failed\n");
+    dbg.printf("scheduler initialised\n", .{});
     tty.printf(" _______  _______  _______  _______  _______ \n", .{});
     tty.printf("(  ____ \\(  ___  )/ ___   )(  ___  )(  ____ \\\n", .{});
     tty.printf("| (    \\/| (   ) |\\/   )  || (   ) || (    \\/\n", .{});
@@ -72,7 +78,10 @@ export fn _start() callconv(.C) noreturn {
     tty.printf("| )      | (___) | /   (_/\\| (___) |/\\____) |\n", .{});
     tty.printf("|/       (_______)(_______/(_______)\\_______)\n", .{});
     tty.printf("Boot finished!!!\n", .{});
-    dbg.printf("FOZOS init done\n", .{});
+    dbg.printf("FOZOS init done, going to the userspace!!!\n", .{});
+    sched.gl_sched.execve_elf("testapp") catch @panic("EXEC fail");
+    @import("drivers/PIT/pit.zig").unmask(); //starts the scheduler
+    pic.IRQ_clear_mask(0);
     done();
 }
 pub fn panic(message: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {

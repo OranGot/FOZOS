@@ -30,7 +30,7 @@ const CAP = packed struct(u64) {
 };
 
 //TODO:  replace with actual timer
-const RESET_TIMEOUT = 100000;
+const RESET_TIMEOUT = 1000000;
 const Version = packed struct(u32) {
     Tertiary: u8,
     Minor: u8,
@@ -303,25 +303,29 @@ pub const NVMe = struct {
     lbas_per_block: u16 = 1,
     inline fn send_io_cmd(self: *NVMe, sqe: SubQEntry) CmdError!*ComplQEntry {
         self.cmd_id += 1;
-        dbg.printf("cmd id: {}\n", .{self.cmd_id - 1});
+        // dbg.printf("cmd id: {}\n", .{self.cmd_id - 1});
         const t_isq_addr = self.io_sq.addr + self.io_sq.tail * @sizeOf(SubQEntry);
         const t_icq_addr = self.io_cq.addr + self.io_cq.tail * @sizeOf(ComplQEntry);
         @as(*volatile SubQEntry, @ptrFromInt(t_isq_addr)).* = sqe;
         if (self.isq_tail_doorbell.* == DEFAULT_ADMIN_QUEUE_SIZE) self.isq_tail_doorbell.* = 0;
         const completion: *volatile ComplQEntry = @ptrFromInt(t_icq_addr);
-        // var timeout: usize = 0;
+        var timeout: usize = 0;
         ADMIN_AWAITING_INTERRUPT = true;
         self.io_sq.tail += 1;
         self.isq_tail_doorbell.* = self.io_sq.tail;
         while (completion.phase_bit != true and ADMIN_AWAITING_INTERRUPT == true) {
-            // if (timeout == RESET_TIMEOUT) {
-            //     dbg.printf("IO command timed out! 0x{x}, 0x{x}, icq: {x}, isq: {x}\n", .{ self.icq_head_doorbell, self.isq_tail_doorbell, self.icq_head_doorbell.*, self.isq_tail_doorbell.* });
-            //     dbg.printf("completion: {any}\n", .{completion});
-            //     dbg.printf("submission: {any}\n", .{@as(*SubQEntry, @ptrFromInt(t_isq_addr))});
-            //     dbg.printf("Target isq address: 0x{x}, target icq address: 0x{x}\n", .{ t_isq_addr, t_icq_addr });
-            //     return error.TimeOut;
-            // }
-            // timeout += 1;
+            if (@as(u15, @bitCast(completion.stat_field)) != 0) {
+                dbg.printf("error\n", .{});
+                return error.Fail;
+            }
+            if (timeout == RESET_TIMEOUT) {
+                dbg.printf("IO command timed out! 0x{x}, 0x{x}, icq: {x}, isq: {x}\n", .{ self.icq_head_doorbell, self.isq_tail_doorbell, self.icq_head_doorbell.*, self.isq_tail_doorbell.* });
+                dbg.printf("completion: {any}\n", .{completion});
+                dbg.printf("submission: {any}\n", .{@as(*SubQEntry, @ptrFromInt(t_isq_addr))});
+                dbg.printf("Target isq address: 0x{x}, target icq address: 0x{x}\n", .{ t_isq_addr, t_icq_addr });
+                return error.TimeOut;
+            }
+            timeout += 1;
         }
         self.io_cq.tail += 1;
         self.icq_head_doorbell.* += 1;
@@ -329,6 +333,7 @@ pub const NVMe = struct {
             dbg.printf("completion: {any}", .{completion});
             return error.Fail;
         }
+        // dbg.printf("end\n", .{});
         return @volatileCast(completion);
     }
     pub fn send_admin_cmd(self: *NVMe, sqe: SubQEntry) CmdError!*ComplQEntry {
@@ -446,13 +451,15 @@ pub const NVMe = struct {
         return self.write(lba * self.lbas_per_block, num_b * self.lbas_per_block, buf, vmm_ctx);
     }
     pub fn write(self: *NVMe, lba: u64, num_b: u16, buf: [*]u8, vmm_ctx: *vmm.VmmFreeList) CmdError!void {
+        if (num_b == 0) return;
         const paddr = vmm_ctx.vaddr_to_paddr(@intFromPtr(buf)) orelse return error.Fail;
         const dptr1: usize = paddr;
 
         var dptr2: usize = paddr + pf.BASE_PAGE_SIZE;
-        if (num_b == 1) {
+        if (num_b <= self.lbas_per_block) {
             dptr2 = 0;
         } else @panic("TODO, BUILD PRP LISTS");
+        // dbg.printf("dptr1: 0x{x}, dptr2: 0x{x}\n", .{ dptr1, dptr2 });
         _ = self.send_io_cmd(SubQEntry{
             .cmd = .{
                 .opcode = 0x1,
@@ -474,6 +481,7 @@ pub const NVMe = struct {
         if (num_b <= self.lbas_per_block) {
             dptr2 = 0;
         } else if (num_b <= self.lbas_per_block * 2) {} else if (num_b / self.lbas_per_block < 4096) {
+            dbg.printf("more lbas\n", .{});
             const bp = pf.request_pages(1) orelse return error.Fail;
             dptr1 = bp;
             const vbp: *[pf.BASE_PAGE_SIZE / @sizeOf(usize)]usize = @ptrFromInt(vmm_ctx.alloc_vaddr(1, bp, true, vmm.PRESENT | vmm.RW) orelse return error.Fail);
@@ -482,10 +490,10 @@ pub const NVMe = struct {
             }
             dptr2 = 0;
         } else {
-            dbg.printf("num blocks: {}, lba: {}\n", .{ num_b, lba });
+            // dbg.printf("num blocks: {}, lba: {}\n", .{ num_b, lba });
             @panic("TODO: build PRP list");
         }
-        dbg.printf("dptr1: 0x{X} dptr2: 0x{X}\n", .{ dptr1, dptr2 });
+        // dbg.printf("dptr1: 0x{X} dptr2: 0x{X}\n", .{ dptr1, dptr2 });
         _ = self.send_io_cmd(SubQEntry{
             .cmd = .{
                 .opcode = 0x2,
@@ -592,7 +600,7 @@ pub const NVMe = struct {
         return null;
     }
     pub fn read_block(self: *NVMe, lba: u64, num_b: u16, buf: [*]u8, vmm_ctx: *vmm.VmmFreeList) CmdError!void {
-        dbg.printf("lba: 0x{X}, num_b: {}, lbas per block: {}\n", .{ lba * self.lbas_per_block, num_b * self.lbas_per_block, self.lbas_per_block });
+        // dbg.printf("lba: 0x{X}, num_b: {}, lbas per block: {}\n", .{ lba * self.lbas_per_block, num_b * self.lbas_per_block, self.lbas_per_block });
         return self.read(lba * self.lbas_per_block, num_b * self.lbas_per_block, buf, vmm_ctx);
     }
     inline fn reset_controller(self: *NVMe) ?void {

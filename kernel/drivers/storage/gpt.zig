@@ -91,7 +91,7 @@ pub fn load_partitions() ?void {
             }) {
                 .ext2 => {
                     dbg.printf("ext2 found!: {any}\n", .{pe});
-                    _ = @import("fs/ext2/main.zig").Ext2.init(pe.starting_lba, pe.ending_lba, 0, 0) orelse @panic("ext2 init fail");
+                    @import("fs/ext2//main.zig").gl_ext2 = @import("fs/ext2/main.zig").Ext2.init(pe.starting_lba, pe.ending_lba, 0, 0) orelse @panic("ext2 init fail");
                     // @panic("test");
                 },
             }

@@ -187,6 +187,7 @@ pub inline fn setup_paging(kphybase: u64, kphy_high: u64) void {
     const ptr = get_stack_ptr();
     //after this I can't modify the stack. this is not good but works. TODO: change that to maybe a single assebly block
     const stack_base = map_stack(DEFAULT_STACK_SIZE / hal.BASE_PAGE_SIZE, base);
+    @import("../gdt/gdt.zig").tss.RSP0 = stack_base;
     const stack_ptr = stack_base - (base - ptr);
     KERNEL_VHIGH += DEFAULT_STACK_SIZE;
     map_ktables(pbase);
@@ -196,8 +197,8 @@ pub inline fn setup_paging(kphybase: u64, kphy_high: u64) void {
 }
 inline fn map_ktables(pbase: usize) void {
     dbg.printf("mapping ktables\n", .{});
-    hvmm.home_freelist.reserve_vaddr(KERNEL_VHIGH, pbase, hal.BASE_PAGE_SIZE * 4, true, true) orelse @panic("RESERVE VADDR FAILED\n");
-    _ = @call(.always_inline, hvmm.VmmFreeList.reserve_vaddr, .{ &hvmm.home_freelist, KERNEL_VHIGH, pbase, hal.BASE_PAGE_SIZE * 4, true, true }) orelse @panic("RESERVE VADDR FAILED!\n");
+    hvmm.home_freelist.reserve_vaddr(KERNEL_VHIGH, pbase, hal.BASE_PAGE_SIZE * 4, true) orelse @panic("RESERVE VADDR FAILED\n");
+    _ = @call(.always_inline, hvmm.VmmFreeList.reserve_vaddr, .{ &hvmm.home_freelist, KERNEL_VHIGH, pbase, hal.BASE_PAGE_SIZE * 4, true }) orelse @panic("RESERVE VADDR FAILED!\n");
     const exp_khigh: virtual_address = @bitCast(KERNEL_VHIGH);
     for (0..4) |e| {
         if (exp_khigh.pml1 + e >= 255) @panic("Kernel too big");

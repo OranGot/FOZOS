@@ -139,7 +139,7 @@ pub fn alloc_vaddr(self: *hal.VmmFreeList, pageno: usize, paddr: usize, kspace: 
                                         const raddr = pf.make_canonical(addr - ((pageno - 1) << 12));
                                         //reserving the addresses on the page table
 
-                                        self.reserve_vaddr(raddr, paddr, pageno * hpf.BASE_PAGE_SIZE, kspace, true) orelse return null;
+                                        self.reserve_vaddr(raddr, paddr, pageno * hpf.BASE_PAGE_SIZE, kspace) orelse return null;
                                         var i: usize = 0;
                                         var p_addr: pf.virtual_address = @bitCast(addr);
                                         while (i < pageno) {
@@ -232,4 +232,68 @@ pub fn page_fault(_: *hal.VmmFreeList, _: *int.int_regs, _: usize) bool {
     }
 
     return true;
+}
+///WARNING: slow
+pub fn map_paddr_to_vaddr(self: *hal.VmmFreeList, paddr: usize, vaddr: usize, pageno: usize, flags: u64) ?void {
+    const pml4: [*]pf.PML4_entry = @ptrFromInt(self.paddr_to_vaddr(self.cr3) orelse return null);
+    for (0..pageno) |page| {
+        const addr: pf.virtual_address = @bitCast(vaddr + page * pmm.BASE_PAGE_SIZE);
+        if (pml4[addr.pml4].present == 0) {
+            const p = pmm.request_pages(1) orelse return null;
+            const v: [*]pf.PML3_entry = @ptrFromInt(hal.home_freelist.alloc_vaddr(1, p, true, hal.PRESENT | hal.RW) orelse return null);
+            defer hal.home_freelist.free_vaddr(@intFromPtr(v), 1);
+            @memset(v[0..512], @as(pf.PML3_entry, @bitCast(@as(u64, @intCast(0))))); //just in case
+            pml4[addr.pml4].addr = @truncate(p >> 12);
+            pml4[addr.pml4].present = 1;
+            pml4[addr.pml4].rw = 1;
+            pml4[addr.pml4].us = 1;
+        }
+
+        const pml3: [*]pf.PML3_entry = @ptrFromInt(self.paddr_to_vaddr(pml4[addr.pml4].addr << 12) orelse self.alloc_vaddr(1, pml4[addr.pml4].addr << 12, true, hal.RW | hal.PRESENT) orelse {
+            return null;
+        });
+        if (pml3[addr.pml3].present == 0) {
+            const p = pmm.request_pages(1) orelse return null;
+            const v: [*]pf.PML2_entry = @ptrFromInt(hal.home_freelist.alloc_vaddr(1, p, true, hal.PRESENT | hal.RW) orelse return null);
+            defer hal.home_freelist.free_vaddr(@intFromPtr(v), 1);
+            @memset(v[0..512], @as(pf.PML2_entry, @bitCast(@as(u64, @intCast(0))))); //just in case
+            pml3[addr.pml3].addr = @truncate(p >> 12);
+            pml3[addr.pml3].present = 1;
+            pml3[addr.pml3].rw = 1;
+            pml3[addr.pml3].us = 1;
+        }
+        const pml2: [*]pf.PML2_entry = @ptrFromInt(self.paddr_to_vaddr(pml3[addr.pml3].addr << 12) orelse self.alloc_vaddr(1, pml3[addr.pml3].addr << 12, true, hal.RW | hal.PRESENT) orelse return null);
+        // const pml2: [*]pf.PML2_entry = @ptrFromInt(self.paddr_to_vaddr(pml3[addr.pml3].addr << 12) orelse return null);
+        if (pml2[addr.pml2].present == 0) {
+            const p = pmm.request_pages(1) orelse return null;
+            const v: [*]pf.PML1_entry = @ptrFromInt(hal.home_freelist.alloc_vaddr(1, p, true, hal.PRESENT | hal.RW) orelse return null);
+            defer hal.home_freelist.free_vaddr(@intFromPtr(v), 1);
+            @memset(v[0..512], @as(pf.PML1_entry, @bitCast(@as(u64, @intCast(0))))); //just in case
+            pml2[addr.pml2].addr = @truncate(p >> 12);
+            pml2[addr.pml2].present = 1;
+            pml2[addr.pml2].rw = 1;
+            pml2[addr.pml2].us = 1;
+        }
+        const pml1: [*]pf.PML1_entry = @ptrFromInt(self.paddr_to_vaddr(pml2[addr.pml2].addr << 12) orelse self.alloc_vaddr(1, pml2[addr.pml2].addr << 12, true, hal.RW | hal.PRESENT) orelse return null);
+        // const pml1: [*]pf.PML1_entry = @ptrFromInt(self.paddr_to_vaddr(pml2[addr.pml2].addr << 12) orelse return null);
+        pml1[addr.pml1].addr = @truncate((paddr + page * pmm.BASE_PAGE_SIZE) >> 12);
+        pml1[addr.pml1] = @bitCast(@as(usize, @bitCast(pml1[addr.pml1])) | flags);
+        self.reserve_vaddr(vaddr, paddr, pageno * pmm.BASE_PAGE_SIZE, true) orelse return null;
+    }
+}
+///function to free the entire freelist. For the kernel area only frees the virtual address space unless the preserve kernel flag was specified. In that case it will preserve anything with type of .K_OCCUPIED
+pub inline fn free_all(self: *hal.VmmFreeList, preserve_kernel: bool) void {
+    var curr_table = self.first;
+    while (curr_table.next != null) : (curr_table = curr_table.next.?) {
+        for (curr_table.t) |e| {
+            if (preserve_kernel == true and (e.t == .K_OCCUPIED or e.t == .K_FREE)) return;
+            if (e.mapped == true) {
+                self.free_vaddr(e.vbase, e.len / pmm.BASE_PAGE_SIZE);
+            }
+            if (e.vbase < pmm.KERNEL_VIRT_BASE) {
+                _ = pmm.free_pages(e.pbase, e.len / pmm.BASE_PAGE_SIZE);
+            }
+            //TODO: this is a very bad way to do this. needs to be redone for a possibility of shared memory working after one of the processes terminates maybe idk?
+        }
+    }
 }
