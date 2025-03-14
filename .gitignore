@@ -1,7 +1,8 @@
-limine
-zig-out/bin
+zig-out
+.zig-cache
 FOZOS.img
 codedump
-.zig-cache
 obj/*
 qemu.log
+
+*.o

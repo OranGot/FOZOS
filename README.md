@@ -20,8 +20,36 @@ Written in: zig, c, assembly
   8. extremely basic system calls
   9. userspace enter
 ## Build
-  1. To build development build of FOZOS first you must have these dependencies: make, zig(0.14.0), qemu, git, sgdisk, clang 
-  2. run sudo make in the root of the project
-  3. That's it! project will now build for x64 which is the only currently supported architecture
-  and it will also be run in qemu.
-If you only want to build the kerner run zig build
+### Dependencies
+To build FOZOS, ensure you have the following dependencies installed:
+- `make`
+- `zig` (0.14.0)
+- `qemu`
+- `git`
+- `sgdisk`
+### Cloning the Repository
+Clone the repository recursively to include the Limine submodule(can be slow, can be faster by adding --depth 1):
+```bash
+git clone --recursive https://github.com/OranGot/FOZOS.git
+```
+### Building the Kernel
+To build the kernel, run:
+```bash
+make kernel
+```
+### Running the OS
+To run the OS as a disk using QEMU, use:
+```bash
+sudo make run
+```
+### Debugging
+For debugging purposes, you can build a debug version of the kernel by appending `-dbg` to the target:
+```bash
+make kernel-dbg
+```
+To run the debug version, use:
+```bash
+sudo make run-dbg
+```
+### Note
+Creating the image uses Loop Devices, which require `sudo` permissions. and also `clean` step for delting mount point ect
