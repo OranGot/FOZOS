@@ -70,10 +70,6 @@ pub fn load_partitions() ?void {
         // dbg.printf("tguid: 0x{x}\n", .{pe.part_t_guid});
 
         if (pe.part_t_guid[0] == 0 and pe.part_t_guid[1] == 0 and pe.part_t_guid[2] == 0 and pe.part_t_guid[3] == 0) return;
-        // if (pe.part_t_guid[0] == ) {
-        // dbg.printf("linux fs found\n", .{});
-        // }
-        // dbg.printf("pe: part t guid {any}, uguid: {any}\ns: 0x{x}, e: 0x{x}\npart t guid offset: 0x{x}: 0x{x}\n", .{ pe.part_t_guid, pe.unique_guid, pe.starting_lba, pe.ending_lba, @bitOffsetOf(part_e, "part_t_guid"), @bitOffsetOf(part_e, "unique_guid") });
         dbg.printf("base: {}, high: {}\n", .{ i + 0x38, i + header.part_e_size - 0x38 });
         const name: []align(1) u16 = std.mem.bytesAsSlice(u16, arr[i + 0x38 .. i + header.part_e_size - 0x38]);
         // dbg.printf("name {any}\n", .{name});
@@ -89,12 +85,14 @@ pub fn load_partitions() ?void {
 
         //TODO: make another way to distinguish between filesystems as this way is suboptimal
         if (ascii_name[0] == 'F') {
-            switch (std.meta.stringToEnum(SupportedFS, ascii_name[1..4]) orelse {
+            switch (std.meta.stringToEnum(SupportedFS, ascii_name[1..5]) orelse {
                 dbg.printf("unsupported fs detected: {s}\n", .{ascii_name[1..5]});
                 continue;
             }) {
                 .ext2 => {
-                    dbg.printf("ext2 found!\n", .{});
+                    dbg.printf("ext2 found!: {any}\n", .{pe});
+                    @import("fs/ext2//main.zig").gl_ext2 = @import("fs/ext2/main.zig").Ext2.init(pe.starting_lba, pe.ending_lba, 0, 0) orelse @panic("ext2 init fail");
+                    // @panic("test");
                 },
             }
         }

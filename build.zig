@@ -31,6 +31,8 @@ pub fn build(b: *std.Build) void {
         .file = b.path("kernel/arch/x64/interrupts/idt.c"),
         .flags = &[_][]const u8{"-std=c99"},
     });
+    kernel.addAssemblyFile(b.path("kernel/proc/sched.S"));
+    kernel.addAssemblyFile(b.path("kernel/arch/x64/syscall/handle.S"));
     // kernel.addCSourceFile(b.path("kernel/arch/x64/interrupts/idt.h"));
     kernel.want_lto = false;
     //const root_source = b.path("kernel/main.zig");

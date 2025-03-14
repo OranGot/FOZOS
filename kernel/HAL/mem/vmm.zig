@@ -58,9 +58,19 @@ pub const VmmEntryTable = extern struct {
     next: ?*VmmEntryTable,
     t: [120]VmmFreeListEntry,
 };
+///shortcut for files to not have to import sched.zig and compactness
+pub inline fn cctx() *VmmFreeList {
+    return @import("../../proc/sched.zig").gl_sched.cw_proc.ctx;
+}
 pub const VmmFreeList = extern struct {
     first: *VmmEntryTable,
     cr3: usize,
+    pub inline fn free_all(self: *VmmFreeList, preserve_kernel: bool) void {
+        switch (target) {
+            .x86_64 => @import("../../arch/x64/paging/vmm.zig").free_all(self, preserve_kernel),
+            else => @compileError("Unsupported arch!!!"),
+        }
+    }
     ///Finds a corresponding physical address of the virtual address
     pub fn vaddr_to_paddr(self: *VmmFreeList, vaddr: usize) ?usize {
         switch (target) {
@@ -88,9 +98,9 @@ pub const VmmFreeList = extern struct {
         }
     }
     /// WARNING: only reserves on the allocator NOT on page tables
-    pub fn reserve_vaddr(self: *VmmFreeList, vbase: usize, pbase: usize, len: usize, kspace: bool, mapped: bool) ?void {
+    pub fn reserve_vaddr(self: *VmmFreeList, vbase: usize, pbase: usize, len: usize, mapped: bool) ?void {
         var t: VmmFreeListEntryType = .U_OCCUPIED;
-        if (kspace == true) {
+        if (vbase >= pmm.KERNEL_VIRT_BASE) {
             t = .K_OCCUPIED;
         }
         _ = self.insert_entry(VmmFreeListEntry{
@@ -132,6 +142,7 @@ pub const VmmFreeList = extern struct {
             }
             ctr += 1;
         }
+
         if (cwnode.vbase == e.vbase and cwnode.len == e.len) { //|*********|
             cwnode.t = e.t;
             cwnode.pbase = e.pbase;
@@ -192,16 +203,19 @@ pub const VmmFreeList = extern struct {
         }
         @panic("TODO VMM! ENTRY NOT HANDLED!");
     }
-
+    pub fn map_paddr_to_vaddr(self: *VmmFreeList, paddr: usize, vaddr: usize, pageno: usize, flags: u64) ?void {
+        switch (target) {
+            .x86_64 => return @import("../../arch/x64/paging/vmm.zig").map_paddr_to_vaddr(self, paddr, vaddr, pageno, flags),
+            else => @compileError("Unsupported arch!!!\n"),
+        }
+    }
     ///simple abstraction for allocating pages
     pub fn alloc_pages(self: *VmmFreeList, pageno: u64, kspace: bool, flags: usize) ?usize {
         const p = pmm.request_pages(pageno) orelse return null;
-        // dbg.printf("allocated physical: 0x{X}\n", .{p});
         return self.alloc_vaddr(pageno, p, kspace, flags);
     }
     ///simple abstraction for freeing pages
     pub fn free_pages(self: *VmmFreeList, base: usize, pageno: u64) void {
-        // dbg.printf("freeing page: 0x{X}, {}\n", .{ base, pageno });
         pmm.free_pages(self.vaddr_to_paddr(base) orelse {
             dbg.printf("Warning, free failed\n", .{});
             return;

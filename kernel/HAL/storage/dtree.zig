@@ -35,6 +35,8 @@ pub const Dtree = struct {
         self.devices.deinit();
     }
     pub fn read_block(self: *Dtree, did: u16, drvid: u16, lba: u64, blockno: u16, buf: [*]u8, vmm_ctx: *vmm.VmmFreeList) anyerror!void {
+        if (did > self.devices.items.len) return error.InvalidDevID;
+        if (drvid > self.devices.items[did].drives.items.len) return error.InvalidDrvID;
         const dev: DriveEntry = self.devices.items[did].drives.items[drvid];
         return dev.readb(self.devices.items[did].self, lba, blockno, buf, vmm_ctx);
     }

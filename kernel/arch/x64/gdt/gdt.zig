@@ -1,4 +1,4 @@
-noinline fn flush_gdt(gdtptr: usize) void {
+inline fn flush_gdt(gdtptr: usize) void {
     dbg.printf("flushing gdt with 0x{X}", .{gdtptr});
     asm volatile (
         \\lgdtq (%[p])
@@ -21,10 +21,17 @@ noinline fn flush_gdt(gdtptr: usize) void {
         \\pushq %rax             
         \\lretq
         \\.reload_CS:
-        //       \\lretq
-        //     \\reloadCodeSeg:
-    );
+        ::: "rax");
     @import("../../../drivers/tty/tty.zig").printf("GDT done\n", .{});
+    // dbg.printf("&TSS: {*}\n", .{&tss});
+    // flush_tss();
+}
+pub fn flush_tss() void {
+    asm volatile ("ltr %ax"
+        :
+        : [_] "{ax}" (0x28),
+        : "rax"
+    );
 }
 const dbg = @import("../../../drivers/dbg/dbg.zig");
 const gdt_ptr = packed struct {
@@ -59,24 +66,28 @@ const gdt_entry_long = packed struct {
     rsrvd: u32,
 };
 pub const TSS = packed struct {
-    rsrvd: u32,
-    RSP0: u64,
-    RSP1: u64,
-    RSP2: u64,
-    rsrvd2: u64,
-    IST1: u64,
-    IST2: u64,
-    IST3: u64,
-    IST4: u64,
-    IST5: u64,
-    IST6: u64,
-    IST7: u64,
-    rsrvd3: u64,
-    rsrvd4: u16,
-    IOBP: u16,
+    rsrvd: u32 = 0,
+    RSP0: u64 = 0,
+    RSP1: u64 = 0,
+    RSP2: u64 = 0,
+    rsrvd2: u64 = 0,
+    IST1: u64 = 0,
+    IST2: u64 = 0,
+    IST3: u64 = 0,
+    IST4: u64 = 0,
+    IST5: u64 = 0,
+    IST6: u64 = 0,
+    IST7: u64 = 0,
+    rsrvd3: u64 = 0,
+    rsrvd4: u16 = 0,
+    IOBP: u16 = 0,
 };
-var tss: TSS = undefined;
-var gdt: [5]gdt_e = undefined;
+const pmm = @import("../../../HAL/mem/pmm.zig");
+pub var tss: TSS = .{
+    .RSP0 = 0, //set it later
+    .IOBP = @sizeOf(TSS),
+};
+var gdt: [7]gdt_e = undefined;
 var ptr: gdt_ptr = undefined;
 // setup and forget about gdt(hopefully)
 pub fn setup_gdt() void {
@@ -85,14 +96,15 @@ pub fn setup_gdt() void {
     setup_gate(0, 0, 0, 0, 0); //          null segment
     setup_gate(0xFFFF, 0, 0x9A, 0xA, 1); //kernel code
     setup_gate(0xFFFF, 0, 0x92, 0xC, 2); //kernel data
-    setup_gate(0xFFFF, 0, 0xFA, 0xA, 3); //user code
     setup_gate(0xFFFF, 0, 0xF2, 0xC, 4); //user data
+    setup_gate(0xFFFF, 0, 0xFA, 0xA, 3); //user code
+    setup_long_gate(5, @sizeOf(TSS) - 1, @intFromPtr(&tss), 0x89, 0);
     dbg.printf("seting up long gate\n", .{});
     //    setup_long_gate(5, @sizeOf(TSS) - 1, @intFromPtr(&tss), 0x89, 0x0); //task state segment
     dbg.printf("gdt gates setup\n", .{});
     ptr = gdt_ptr{
         .offset = @intFromPtr(&gdt),
-        .size = @sizeOf(gdt_e) * 5 - 1,
+        .size = @sizeOf(gdt_e) * 7 - 1,
     };
     flush_gdt(@intFromPtr(&ptr));
 }
@@ -107,7 +119,7 @@ fn setup_gate(limit: u20, base: u32, access: u8, flag: u4, entid: u8) void {
         .access = access,
     };
 }
-fn setup_long_gate(baseid: u8, limit: u20, base: u64, access: u8, flag: u8) void {
+fn setup_long_gate(baseid: u8, limit: u20, base: u64, access: u8, flag: u4) void {
     setup_gate(limit, @truncate(base), access, flag, baseid);
     if (baseid + 1 >= gdt.len) {
         dbg.printf("base id too big\n", .{});

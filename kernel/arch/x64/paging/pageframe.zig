@@ -187,6 +187,7 @@ pub inline fn setup_paging(kphybase: u64, kphy_high: u64) void {
     const ptr = get_stack_ptr();
     //after this I can't modify the stack. this is not good but works. TODO: change that to maybe a single assebly block
     const stack_base = map_stack(DEFAULT_STACK_SIZE / hal.BASE_PAGE_SIZE, base);
+    @import("../gdt/gdt.zig").tss.RSP0 = stack_base;
     const stack_ptr = stack_base - (base - ptr);
     KERNEL_VHIGH += DEFAULT_STACK_SIZE;
     map_ktables(pbase);
@@ -196,10 +197,11 @@ pub inline fn setup_paging(kphybase: u64, kphy_high: u64) void {
 }
 inline fn map_ktables(pbase: usize) void {
     dbg.printf("mapping ktables\n", .{});
-    hvmm.home_freelist.reserve_vaddr(KERNEL_VHIGH, pbase, hal.BASE_PAGE_SIZE * 4, true, true) orelse @panic("RESERVE VADDR FAILED\n");
-    _ = @call(.always_inline, hvmm.VmmFreeList.reserve_vaddr, .{ &hvmm.home_freelist, KERNEL_VHIGH, pbase, hal.BASE_PAGE_SIZE * 4, true, true }) orelse @panic("RESERVE VADDR FAILED!\n");
+    hvmm.home_freelist.reserve_vaddr(KERNEL_VHIGH, pbase, hal.BASE_PAGE_SIZE * 4, true) orelse @panic("RESERVE VADDR FAILED\n");
+    _ = @call(.always_inline, hvmm.VmmFreeList.reserve_vaddr, .{ &hvmm.home_freelist, KERNEL_VHIGH, pbase, hal.BASE_PAGE_SIZE * 4, true }) orelse @panic("RESERVE VADDR FAILED!\n");
     const exp_khigh: virtual_address = @bitCast(KERNEL_VHIGH);
     for (0..4) |e| {
+        if (exp_khigh.pml1 + e >= 255) @panic("Kernel too big");
         kernel_PML1_table[exp_khigh.pml1 + e].present = 1;
         kernel_PML1_table[exp_khigh.pml1 + e].rw = 1;
         kernel_PML1_table[exp_khigh.pml1 + e].addr = @truncate((pbase + e * hal.BASE_PAGE_SIZE) >> 12);
@@ -230,7 +232,7 @@ fn map_stack(pno: usize, base: usize) usize {
     palloc.reserve_address(phybase - pno * hal.BASE_PAGE_SIZE, pno, .NO_FREE_RESERVED) orelse @panic("Can't reserve stack's address. this really shouldn't happen\n");
     var stack_page = phybase - pno * hal.BASE_PAGE_SIZE;
     for (expanded_vhigh.pml1..expanded_vhigh.pml1 + pno) |i| {
-        if (i == 255) @panic("kernel too big, can't allocate stack");
+        if (i == 254) @panic("kernel too big, can't allocate stack");
         kernel_PML1_table[i] = PML1_entry{
             .present = 1,
             .rw = 1,

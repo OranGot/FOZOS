@@ -16,11 +16,14 @@ Written in: zig, c, assembly
   4. vmm
   5. nvme(basic)
   6. gpt
+  7. EXT2(basic)
+  8. extremely basic system calls
+  9. userspace enter
 ## Build
 ### Dependencies
 To build FOZOS, ensure you have the following dependencies installed:
 - `make`
-- `zig` (latest version)
+- `zig` (0.14.0)
 - `qemu`
 - `git`
 - `sgdisk`

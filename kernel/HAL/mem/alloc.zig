@@ -22,13 +22,14 @@ var home_allocator_superblock: allocator_superblock = undefined;
 pub const gp_allocator = struct {
     first_superblock: *allocator_superblock = &home_allocator_superblock,
 
-    pub fn free(_: *anyopaque, buf: []u8, _: u8, _: usize) void {
-        // dbg.printf("running free\n", .{});
+    pub fn free(_: *anyopaque, buf: []u8, _: mem.Alignment, _: usize) void {
+        dbg.printf("running free\n", .{});
         var working_superblock: *allocator_superblock = &home_allocator_superblock;
         while (true) {
             for (&working_superblock.descriptors) |*d| {
-                if (d.base >> 12 == @intFromPtr(buf.ptr) >> 12) {
+                if (d.base == @intFromPtr(buf.ptr) / pageframe.BASE_PAGE_SIZE) {
                     for (@intFromPtr(buf.ptr) % pageframe.BASE_PAGE_SIZE * 8..(@intFromPtr(buf.ptr) % pageframe.BASE_PAGE_SIZE) * 8 + buf.len * 8) |v| {
+                        dbg.printf("v: {}\n", .{v});
                         if (get_bit_of_num(@intCast(d.bitmap[v / 8]), @truncate(v % 8)) == true) {
                             set_bit_of_num(@alignCast(@ptrCast(&d.bitmap[v / 8])), @truncate(v % 8), false);
                         } else {
@@ -46,7 +47,7 @@ pub const gp_allocator = struct {
             }
         }
     }
-    pub fn alloc(_: *anyopaque, len: usize, ptr_align: u8, _: usize) ?[*]u8 {
+    pub fn alloc(_: *anyopaque, len: usize, ptr_align: mem.Alignment, _: usize) ?[*]u8 {
         // dbg.printf("alloc called\n", .{});
         // dbg.printf("alloc called len: {} align: {}\n", .{ len, ptr_align });
         //const self: *gp_allocator = @alignCast(@ptrCast(selfo));
@@ -70,18 +71,19 @@ pub const gp_allocator = struct {
                     while (i < pageframe.BASE_PAGE_SIZE / 8) : (i += 1) { // NOTE: this is probably very inefficent as I use first fit
                         for (0..8) |bit| {
                             // dbg.printf("curfit: {}\n", .{curfit});
-                            if (get_bit_of_num(d.bitmap[i], @truncate(bit)) == true or curfit >= len) {
-                                if (curfit >= len and ptr_align == 0 or curfit >= len and mem.isAligned(d.base + i * 8 + bit, @as(usize, 1) << @truncate(ptr_align))) {
-                                    // dbg.printf("ALLOC INFO: reserving vaddr\n", .{});
-                                    for (i * 8 + bit - curfit..i * 8 + bit) |ii| {
-                                        // dbg.printf("ii: {}", .{ii});
-                                        // dbg.printf("{any}\n", .{d.bitmap});
-                                        set_bit_of_num(&d.bitmap[ii / 8], @truncate(ii % 8), true);
-                                    }
-                                    // dbg.printf("\nALLOC INFO allocated address: 0x{X}\n", .{d.base + i * 8 + bit - curfit});
-
-                                    return @ptrFromInt(d.base + i * 8 + bit - curfit);
+                            if (get_bit_of_num(d.bitmap[i], @truncate(bit)) == true) {
+                                curfit = 0;
+                            }
+                            if (curfit >= len and ptr_align.check(d.base + i * 8 + bit)) {
+                                // dbg.printf("ALLOC: reserving vaddr: {}\n", .{curfit});
+                                for (i * 8 + bit - len..i * 8 + bit) |ii| {
+                                    // dbg.printf("ii: {}/{}\n", .{ ii, len });
+                                    // dbg.printf("{any}\n", .{d.bitmap});
+                                    set_bit_of_num(&d.bitmap[ii / 8], @truncate(ii % 8), true);
                                 }
+                                // dbg.printf("\nALLOC INFO allocated address: 0x{X}\n", .{d.base + i * 8 + bit - curfit});
+
+                                return @ptrFromInt(d.base + i * 8 + bit - len);
                             } else curfit += 1;
                         }
                     }
@@ -108,7 +110,15 @@ pub const gp_allocator = struct {
             }
         }
     }
-    pub fn resize(_: *anyopaque, buf: []u8, _: u8, new_len: usize, _: usize) bool {
+    pub fn remap(s: *anyopaque, buf: []u8, al: mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
+        dbg.printf("remap running: {}\n", .{new_len});
+        const nb = alloc(s, new_len, al, 0) orelse return null;
+        @memcpy(nb, buf);
+        dbg.printf("runing free\n", .{});
+        free(s, buf, al, 0);
+        return nb;
+    }
+    pub fn resize(_: *anyopaque, buf: []u8, _: mem.Alignment, new_len: usize, _: usize) bool {
         // dbg.printf("running resize\n", .{});
         var current_superblock: *allocator_superblock = &home_allocator_superblock;
         while (true) {
@@ -143,6 +153,7 @@ pub fn init() void {
         .free = &gp_allocator.free,
         .alloc = &gp_allocator.alloc,
         .resize = &gp_allocator.resize,
+        .remap = &gp_allocator.remap,
     };
     gl_alloc = mem.Allocator{
         .ptr = &allocator,

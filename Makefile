@@ -15,7 +15,7 @@ clean:
 
 hdd: clean zig-out/bin/kernel limine
 	dd if=/dev/zero bs=1M count=0 seek=64 of=FOZOS.img
-	sgdisk FOZOS.img -n 1:2048:8192 -t 1:ef00 -N 2 -c 1:"UEFI" -c 2:"Fext2" 
+	sgdisk FOZOS.img -n 1:2048:16384 -t 1:ef00 -N 2 -c 1:"UEFI" -c 2:"Fext2" 
 	./limine/limine bios-install FOZOS.img
 	mformat -i FOZOS.img@@1M
 	mmd -i FOZOS.img@@1M ::/EFI ::/EFI/BOOT ::/boot ::/boot/limine
@@ -29,6 +29,8 @@ hdd: clean zig-out/bin/kernel limine
 	mkfs.ext2 /dev/loop102 -L "FOZOS_EXT2" -b 4096 
 	mkdir -p /mnt/fozos
 	mount /dev/loop102 /mnt/fozos
+	as -o apps/testapp/test.o apps/testapp/test.S --64
+	ld  -nostdlib --nmagic -o indisk/testapp apps/testapp/test.o
 	cp -r indisk/* /mnt/fozos 
 	umount /mnt/fozos
 	-losetup -d /dev/loop101 || true

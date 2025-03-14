@@ -40,15 +40,21 @@ pub const idtr_t = extern struct {
 };
 var int_handle_t: [224]?*const fn (*int_regs) void = undefined;
 ///Binds a specific vector
-pub fn bind_vector(te: *const fn (*int_regs) void, v: u16) ?void {
+pub fn bind_vector(te: ?*const fn (*int_regs) void, v: u16) ?void {
     if (v > 255) return null;
+    dbg.printf("checking index: {any}\n", .{int_handle_t[v - 32]});
     if (int_handle_t[v - 32] != null) return null;
+    dbg.printf("setting interrupt index: {}\n", .{v - 32});
     int_handle_t[v - 32] = te;
 }
 ///Allocates an interrupt vector
 pub fn alloc_vector(te: *const fn (*int_regs) void) ?u16 {
     var v: u16 = 0;
     for (&int_handle_t) |*e| {
+        if (v < 15) {
+            v += 1;
+            continue;
+        }
         if (e.* == null) {
             e.* = te;
             return v + 32;
@@ -94,6 +100,19 @@ const exep_lookup_table = [_][]const u8{
     "r9",
 };
 fn exep_handle(int: *int_regs) void {
+    switch (int.int_no) {
+        0xe => {
+            const cr2 = dump_cr2();
+            dbg.printf("address of page fault: 0x{x}\n", .{cr2});
+            if (@import("../paging/vmm.zig").page_fault(&@import("../../../HAL/mem/vmm.zig").home_freelist, int, cr2) == false) {
+                dbg.printf("recovered.\n", .{});
+                return;
+            }
+            tty.printf("address of page fault: 0x{x}\n", .{cr2});
+        },
+
+        else => dbg.printf("No exception handler registred\n", .{}),
+    }
     dbg.printf("FOZOS CRASHED!!!\nCAUSE: {s}: 0x{x}, ERROR CODE: 0b{b}\n" ++
         "REGISTERS\nR15: 0x{x}, R14: 0x{x}, R13: 0x{x}, R12: 0x{x}, R11: 0x{x}, R10: 0x{x} R9: 0x{x} " ++
         "R8: 0x{x}\nRAX: 0x{x}, RBX: 0x{x}, RCX: 0x{x}, RDX: 0x{x}, RBP: 0x{x}, RIP: 0x{x}, RSI: 0x{x}, RSP: 0x{x}\n" ++
@@ -110,19 +129,7 @@ fn exep_handle(int: *int_regs) void {
         int.rsp,                       int.rflags,
         int.ss,                        int.cs,
     });
-    switch (int.int_no) {
-        0xe => {
-            const cr2 = dump_cr2();
-            if (@import("../paging/vmm.zig").page_fault(&@import("../../../HAL/mem/vmm.zig").home_freelist, int, cr2) == false) {
-                dbg.printf("recovered.\n", .{});
-                return;
-            }
-            tty.printf("address of page fault: 0x{x}", .{cr2});
-            dbg.printf("address of page fault: 0x{x}", .{cr2});
-        },
 
-        else => dbg.printf("No handler registred\n", .{}),
-    }
     tty.printf("FOZOS CRASHED!!!\nCAUSE: {s}: 0x{x}, ERROR CODE: 0b{b}\n" ++
         "REGISTERS\nR15: 0x{x}, R14: 0x{x}, R13: 0x{x}, R12: 0x{x}, R11: 0x{x}, R10: 0x{x} R9: 0x{x} " ++
         "R8: 0x{x}\nRAX: 0x{x}, RBX: 0x{x}, RCX: 0x{x}, RDX: 0x{x}, RBP: 0x{x}, RIP: 0x{x}, RSI: 0x{x}, RSP: 0x{x}\n" ++
@@ -164,7 +171,7 @@ fn dump_cr2() usize {
     );
 }
 pub export fn handle_int(int: *int_regs) callconv(.C) void {
-    if (int.int_no <= 32) {
+    if (int.int_no < 32) {
         exep_handle(int);
     }
     if (int_handle_t[int.int_no - 32]) |handle| {
@@ -176,10 +183,9 @@ pub export fn handle_int(int: *int_regs) callconv(.C) void {
     pic.send_EOI(@truncate(int.int_no - 32));
 }
 extern fn idt_init() callconv(.C) void;
-fn null_stub(_: *int_regs) void {}
 pub fn init() void {
     idt_init();
     for (32..32 + 16) |v| {
-        bind_vector(null_stub, @truncate(v)) orelse unreachable;
+        bind_vector(null, @truncate(v)) orelse unreachable;
     }
 }

@@ -39,7 +39,7 @@ isr_common_stub:
 
     test qword ptr [rsp + 24], 0x03
     je 1f
-    swapgs
+;    swapgs
 1:
 
     pushall
@@ -50,7 +50,7 @@ isr_common_stub:
 
     test qword ptr [rsp + 8], 0x03
     je 1f
-    swapgs
+;    swapgs
 1:
 
     iretq
