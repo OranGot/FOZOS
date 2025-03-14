@@ -16,8 +16,11 @@ Written in: zig, c, assembly
   4. vmm
   5. nvme(basic)
   6. gpt
+  7. EXT2(basic)
+  8. extremely basic system calls
+  9. userspace enter
 ## Build
-  1. To build development build of FOZOS first you must have these dependencies: make, zig(latest), qemu, git, sgdisk, clang 
+  1. To build development build of FOZOS first you must have these dependencies: make, zig(0.14.0), qemu, git, sgdisk, clang 
   2. run sudo make in the root of the project
   3. That's it! project will now build for x64 which is the only currently supported architecture
   and it will also be run in qemu.
