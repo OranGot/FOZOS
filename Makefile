@@ -25,8 +25,8 @@ hdd: clean zig-out/bin/kernel limine
 	mcopy -i FOZOS.img@@1M limine/BOOTX64.EFI ::/EFI/BOOT
 	mcopy -i FOZOS.img@@1M limine/BOOTIA32.EFI ::/EFI/BOOT
 	losetup /dev/loop101 FOZOS.img
-	losetup /dev/loop102 FOZOS.img -o 4194304
-	mkfs.ext2 /dev/loop102 -L "FOZOS_EXT2" -b 4096 
+	losetup /dev/loop102 FOZOS.img -o 9437184
+	mkfs.ext2 /dev/loop102 -L "FOZOS_EXT2" -b 4096 -I 128
 	mkdir -p /mnt/fozos
 	mount /dev/loop102 /mnt/fozos
 	as -o apps/testapp/test.o apps/testapp/test.S --64
